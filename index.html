@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="description" content="Responsive 2-Day Full-Body Workout Tracker (Day A & Day B) with interactive 360° 3D anatomical form models, weight & rep logging, and 8-bit rest timer." />
+  <title>PulseLift — 2-Day Full-Body 3D Workout Routine</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="stylesheet" href="style.css?v=13" />
+</head>
+<body>
+  <!-- Full-screen Visual Alert Flash Overlay when Timer hits 00:00 -->
+  <div id="timerFlashOverlay" class="timer-flash-overlay" aria-hidden="true"></div>
+
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">
+          <svg viewBox="0 0 40 40" width="36" height="36">
+            <rect x="2" y="2" width="36" height="36" rx="10" fill="#1e293b" stroke="#2dd4bf" stroke-width="2" />
+            <g transform="rotate(-28 20 20)">
+              <rect x="12" y="18.5" width="16" height="3" rx="1.5" fill="#e2e8f0" />
+              <rect x="8" y="13" width="4" height="14" rx="1.5" fill="#2dd4bf" />
+              <rect x="5" y="15" width="2.5" height="10" rx="1" fill="#fb7185" />
+              <rect x="28" y="13" width="4" height="14" rx="1.5" fill="#2dd4bf" />
+              <rect x="32.5" y="15" width="2.5" height="10" rx="1" fill="#fb7185" />
+            </g>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title-row">
+            <h1 class="brand-title">PulseLift 3D</h1>
+            <span id="pwaStatusBadge" class="pwa-badge" title="Service Worker caches app for offline use">
+              <span class="pwa-dot"></span>
+              <span id="pwaStatusText">Offline Ready</span>
+            </span>
+          </div>
+          <p class="brand-subtitle">2-Day Full-Body Routine · Interactive 360° Anatomical 3D Form</p>
+        </div>
+      </div>
+
+      <!-- Top Page Navigation Switcher -->
+      <nav class="main-page-nav" aria-label="Primary Page Navigation">
+        <button id="navTrackerPageBtn" class="page-nav-btn active" type="button" data-page="tracker">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 10h14M6 6v8M14 6v8M4 8v4M16 8v4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>2-Day Routine</span>
+        </button>
+        <button id="navLibraryPageBtn" class="page-nav-btn" type="button" data-page="library">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 4h5v5H4V4zm7 0h5v5h-5V4zM4 11h5v5H4v-5zm7 0h5v5h-5v-5z" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Exercise Library</span>
+          <span class="nav-pill-count">24</span>
+        </button>
+      </nav>
+
+      <div class="header-actions">
+        <button id="openTutorialBtn" class="btn-secondary btn-sm tutorial-trigger-btn" type="button" title="How to use PulseLift 3D">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="10" cy="10" r="8" />
+            <path d="M8.2 7.5a2 2 0 113.2 1.6c-.7.5-1.4 1-1.4 2v.4" stroke-linecap="round" />
+            <circle cx="10" cy="14.5" r="0.8" fill="currentColor" />
+          </svg>
+          <span>How to Use</span>
+        </button>
+        <button id="installPwaBtn" class="btn-ghost btn-sm hidden" type="button" title="Install App on Device">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10 3v10m0 0l-3.5-3.5M10 13l3.5-3.5M4 16h12" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Install</span>
+        </button>
+        <button id="toggleHistoryBtn" class="btn-secondary btn-sm" type="button" aria-expanded="false" aria-controls="historyDrawer">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M10 5v5l3 2m5-2a8 8 0 11-2.34-5.66L18 6M18 2v4h-4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>History</span>
+          <span id="historyCountBadge" class="badge-count">0</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-main">
+    <!-- PAGE 1: 2-Day Workout Routine Tracker -->
+    <div id="trackerPageView" class="page-view">
+    <!-- Day Switcher & Session Progress Bar -->
+    <section class="control-bar" aria-label="Workout Day Selection">
+      <div class="day-tabs" role="tablist" aria-label="Routine Days">
+        <button
+          id="tabDayA"
+          class="day-tab active"
+          role="tab"
+          aria-selected="true"
+          aria-controls="workoutContainer"
+          data-day="dayA"
+          type="button"
+        >
+          <span class="tab-badge">DAY A</span>
+          <span class="tab-title">Squat · Push · Row</span>
+          <span id="tabDayAProgress" class="tab-progress-pill">0/12</span>
+        </button>
+        <button
+          id="tabDayB"
+          class="day-tab"
+          role="tab"
+          aria-selected="false"
+          aria-controls="workoutContainer"
+          data-day="dayB"
+          type="button"
+        >
+          <span class="tab-badge">DAY B</span>
+          <span class="tab-title">Hinge · Press · Lunge</span>
+          <span id="tabDayBProgress" class="tab-progress-pill">0/12</span>
+        </button>
+      </div>
+
+      <!-- Day Summary & Actions -->
+      <div class="day-overview-card">
+        <div class="overview-top">
+          <div class="overview-info">
+            <h2 id="activeDayHeading" class="overview-heading">Day A — Squat, Floor Press, Row &amp; Decompress</h2>
+            <p id="activeDayDesc" class="overview-desc">Drag any 3D model to rotate 360° or tap angle presets to inspect joint alignment and glowing target muscles.</p>
+          </div>
+          <div class="overview-stats">
+            <div class="stat-chip">
+              <span class="stat-label">Sets Done</span>
+              <strong id="setsCompletedStat" class="stat-value">0 / 12</strong>
+            </div>
+            <div class="stat-chip">
+              <span class="stat-label">Day Volume</span>
+              <strong id="dayVolumeStat" class="stat-value">0 kg</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="progress-track" aria-hidden="true">
+          <div id="dayProgressBar" class="progress-fill" style="width: 0%"></div>
+        </div>
+
+        <div class="overview-footer">
+          <div class="legend-and-toggle">
+            <label class="auto-timer-toggle">
+              <input type="checkbox" id="autoStartTimerCheckbox" checked />
+              <span class="toggle-label">Auto-start rest timer on set check</span>
+            </label>
+            <div class="heatmap-legend" aria-label="3D Muscle Heatmap Legend">
+              <span class="legend-item"><i class="dot-primary"></i> Primary Muscle</span>
+              <span class="legend-item"><i class="dot-secondary"></i> Stabilizer</span>
+            </div>
+          </div>
+
+          <div class="overview-buttons">
+            <button id="logWorkoutBtn" class="btn-accent btn-sm" type="button" title="Save current workout snapshot to History">
+              <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 10l3.5 3.5L15 7" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>Save Workout Log</span>
+            </button>
+            <button id="resetDayBtn" class="btn-danger-outline btn-sm" type="button" title="Clear completed sets for this day">
+              <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 6h12M6 6v10a1 1 0 001 1h6a1 1 0 001-1V6M8 6V4a1 1 0 011-1h2a1 1 0 011 1v2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>Reset Day</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Collapsible Workout History Panel -->
+    <section id="historyDrawer" class="history-panel hidden" aria-label="Workout History Log">
+      <div class="history-header">
+        <div>
+          <h3 class="history-title">Saved Workout History</h3>
+          <p class="history-subtitle">Stored locally on your device via <code>localStorage</code></p>
+        </div>
+        <div class="history-header-actions">
+          <button id="clearHistoryBtn" class="btn-danger-outline btn-xs" type="button">Clear History</button>
+          <button id="closeHistoryBtn" class="btn-ghost btn-xs" type="button">Close</button>
+        </div>
+      </div>
+      <div id="historyList" class="history-list"></div>
+    </section>
+
+    <!-- Exercise Cards Grid -->
+    <section id="workoutContainer" class="exercise-grid" role="tabpanel" aria-live="polite">
+      <!-- Populated dynamically by script.js -->
+    </section>
+    </div>
+
+    <!-- PAGE 2: Exercise Library (5 Equipment Sections + Interactive GUI Muscle Mannequin Filter) -->
+    <div id="libraryPageView" class="page-view hidden" aria-label="Exercise Library">
+      <section class="library-hero-hub">
+        <!-- Left Column: Interactive GUI Anatomical Mannequin Muscle Filter (No Checkboxes!) -->
+        <div class="mannequin-filter-card">
+          <div class="mannequin-card-header">
+            <div>
+              <span class="exercise-order-badge">INTERACTIVE GUI MUSCLE FILTER</span>
+              <h2 class="mannequin-card-title">Select Muscles on the Mannequin</h2>
+              <p class="mannequin-card-subtitle">Click any muscle directly on the 3D or Front/Back anatomical dummy to filter exercises—no checkboxes needed.</p>
+            </div>
+            <button id="clearDummyFilterBtn" class="btn-danger-outline btn-xs hidden" type="button">
+              ✕ Clear Muscle Filter
+            </button>
+          </div>
+
+          <div class="mannequin-dual-stage">
+            <!-- 1. Interactive 360° 3D Mannequin Selector -->
+            <div class="mannequin-3d-wrap">
+              <div class="mannequin-stage-label">360° 3D Dummy (Click Muscle)</div>
+              <div class="mannequin-3d-canvas-box">
+                <canvas
+                  id="libraryFilterMannequinCanvas"
+                  class="mannequin-3d-canvas"
+                  data-filter-mannequin="true"
+                ></canvas>
+              </div>
+              <div class="mannequin-3d-cam-bar">
+                <button type="button" class="mini-cam-btn active" data-dummy-cam="18,12">Front</button>
+                <button type="button" class="mini-cam-btn" data-dummy-cam="198,12">Back</button>
+                <button type="button" class="mini-cam-btn" data-dummy-cam="90,12">Side</button>
+                <button type="button" class="mini-cam-btn" data-dummy-spin="true">↻ 360°</button>
+              </div>
+            </div>
+
+            <!-- 2. Anterior (Front) & Posterior (Back) Interactive SVG Anatomical Dummy -->
+            <div class="mannequin-svg-wrap">
+              <div class="mannequin-stage-label">Front &amp; Back Muscle Map (Click to Toggle)</div>
+              <div class="svg-dummies-row">
+                <!-- Anterior (Front) Dummy -->
+                <div class="svg-dummy-col">
+                  <span class="dummy-view-tag">ANTERIOR (FRONT)</span>
+                  <svg class="anatomical-dummy-svg" viewBox="0 0 140 280" aria-label="Front Anatomical Muscle Selector">
+                    <!-- Base Neutral Silhouette -->
+                    <g class="dummy-base-silhouette">
+                      <circle cx="70" cy="24" r="15" />
+                      <rect x="64" y="38" width="12" height="10" rx="3" />
+                      <path d="M44 48 H96 L92 132 H48 Z" />
+                      <rect x="27" y="52" width="14" height="72" rx="7" transform="rotate(8 34 52)" />
+                      <rect x="99" y="52" width="14" height="72" rx="7" transform="rotate(-8 106 52)" />
+                      <rect x="47" y="132" width="20" height="125" rx="9" />
+                      <rect x="73" y="132" width="20" height="125" rx="9" />
+                    </g>
+
+                    <!-- Clickable Anterior Muscle Regions -->
+                    <!-- Front & Side Delts (Shoulders) -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="frontDelts" data-muscle-label="Shoulders (Front Delts)">
+                      <path d="M32 48 C27 52, 26 65, 34 70 L46 64 L45 48 Z" />
+                      <path d="M108 48 C113 52, 114 65, 106 70 L94 64 L95 48 Z" />
+                    </g>
+                    <g class="dummy-muscle-region" data-dummy-muscle="sideDelts" data-muscle-label="Shoulders (Side Delts)">
+                      <path d="M27 54 C22 60, 23 70, 30 74 L35 68 Z" />
+                      <path d="M113 54 C118 60, 117 70, 110 74 L105 68 Z" />
+                    </g>
+
+                    <!-- Pectorals (Chest) -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="pecs" data-muscle-label="Pectorals (Chest)">
+                      <path d="M46 50 H69 V76 C58 78, 48 74, 45 65 Z" />
+                      <path d="M71 50 H94 L95 65 C92 74, 82 78, 71 76 Z" />
+                    </g>
+
+                    <!-- Biceps -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="biceps" data-muscle-label="Biceps Brachii">
+                      <rect x="26" y="72" width="13" height="26" rx="6" transform="rotate(6 32 85)" />
+                      <rect x="101" y="72" width="13" height="26" rx="6" transform="rotate(-6 108 85)" />
+                    </g>
+
+                    <!-- Forearms -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="forearms" data-muscle-label="Forearms & Grip">
+                      <rect x="21" y="99" width="12" height="28" rx="5" transform="rotate(8 27 113)" />
+                      <rect x="107" y="99" width="12" height="28" rx="5" transform="rotate(-8 113 113)" />
+                    </g>
+
+                    <!-- Core / Abs & Obliques -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="core" data-muscle-label="Core / Abs & Obliques">
+                      <rect x="53" y="78" width="15" height="14" rx="3" />
+                      <rect x="72" y="78" width="15" height="14" rx="3" />
+                      <rect x="53" y="94" width="15" height="14" rx="3" />
+                      <rect x="72" y="94" width="15" height="14" rx="3" />
+                      <rect x="54" y="110" width="14" height="16" rx="3" />
+                      <rect x="72" y="110" width="14" height="16" rx="3" />
+                    </g>
+
+                    <!-- Quadriceps -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="quads" data-muscle-label="Quadriceps (Front Thighs)">
+                      <path d="M47 134 H67 L65 194 H48 Z" />
+                      <path d="M73 134 H93 L92 194 H75 Z" />
+                    </g>
+
+                    <!-- Calves (Front Tibialis / Gastrocnemius) -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="calves" data-muscle-label="Calves">
+                      <rect x="48" y="202" width="16" height="44" rx="7" />
+                      <rect x="76" y="202" width="16" height="44" rx="7" />
+                    </g>
+                  </svg>
+                </div>
+
+                <!-- Posterior (Back) Dummy -->
+                <div class="svg-dummy-col">
+                  <span class="dummy-view-tag">POSTERIOR (BACK)</span>
+                  <svg class="anatomical-dummy-svg" viewBox="0 0 140 280" aria-label="Back Anatomical Muscle Selector">
+                    <!-- Base Neutral Silhouette -->
+                    <g class="dummy-base-silhouette">
+                      <circle cx="70" cy="24" r="15" />
+                      <rect x="64" y="38" width="12" height="10" rx="3" />
+                      <path d="M44 48 H96 L92 132 H48 Z" />
+                      <rect x="27" y="52" width="14" height="72" rx="7" transform="rotate(8 34 52)" />
+                      <rect x="99" y="52" width="14" height="72" rx="7" transform="rotate(-8 106 52)" />
+                      <rect x="47" y="132" width="20" height="125" rx="9" />
+                      <rect x="73" y="132" width="20" height="125" rx="9" />
+                    </g>
+
+                    <!-- Clickable Posterior Muscle Regions -->
+                    <!-- Upper Back / Traps & Rhomboids -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="upperBack" data-muscle-label="Upper Back (Traps & Rhomboids)">
+                      <polygon points="70,40 46,48 56,78 70,84 84,78 94,48" />
+                    </g>
+
+                    <!-- Rear Delts -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="rearDelts" data-muscle-label="Rear Delts (Posterior Shoulder)">
+                      <path d="M30 49 L45 49 L44 66 L28 66 Z" />
+                      <path d="M95 49 L110 49 L112 66 L96 66 Z" />
+                    </g>
+
+                    <!-- Lats (Latissimus Dorsi) -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="lats" data-muscle-label="Lats (Latissimus Dorsi)">
+                      <polygon points="45,68 57,78 58,108 48,102" />
+                      <polygon points="95,68 83,78 82,108 92,102" />
+                    </g>
+
+                    <!-- Triceps -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="triceps" data-muscle-label="Triceps Brachii">
+                      <rect x="26" y="70" width="13" height="27" rx="6" transform="rotate(6 32 84)" />
+                      <rect x="101" y="70" width="13" height="27" rx="6" transform="rotate(-6 108 84)" />
+                    </g>
+
+                    <!-- Lower Back (Erector Spinae) -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="lowerBack" data-muscle-label="Lower Back (Erector Spinae)">
+                      <rect x="58" y="85" width="24" height="32" rx="5" />
+                    </g>
+
+                    <!-- Glutes -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="glutes" data-muscle-label="Glutes (Gluteus Maximus)">
+                      <rect x="46" y="118" width="23" height="26" rx="10" />
+                      <rect x="71" y="118" width="23" height="26" rx="10" />
+                    </g>
+
+                    <!-- Hamstrings -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="hamstrings" data-muscle-label="Hamstrings (Posterior Thigh)">
+                      <rect x="47" y="146" width="20" height="48" rx="7" />
+                      <rect x="73" y="146" width="20" height="48" rx="7" />
+                    </g>
+
+                    <!-- Calves (Posterior) -->
+                    <g class="dummy-muscle-region" data-dummy-muscle="calves" data-muscle-label="Calves (Gastrocnemius & Soleus)">
+                      <rect x="48" y="202" width="16" height="44" rx="7" />
+                      <rect x="76" y="202" width="16" height="44" rx="7" />
+                    </g>
+                  </svg>
+                </div>
+              </div>
+              <div id="dummyHoverReadout" class="dummy-hover-readout">
+                Hover or click any muscle on the dummy to filter exercises
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column: Search Bar, Equipment Section Switcher & Filters -->
+        <div class="library-controls-card">
+          <div>
+            <span class="exercise-order-badge">COMPLETE 3D EXERCISE DIRECTORY</span>
+            <h2 class="library-main-heading">Exercise Library — 5 Equipment Sections</h2>
+            <p class="library-main-desc">
+              Explore <strong>Dumbbell</strong>, <strong>Barbell</strong>, <strong>Kettlebell</strong>, <strong>Bodyweight</strong>, and <strong>Other Equipment</strong> exercises with 360° 3D form animations.
+            </p>
+          </div>
+
+          <!-- Search Bar -->
+          <div class="library-search-box">
+            <svg class="search-icon" viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="9" cy="9" r="6" />
+              <path d="M13.5 13.5L17 17" stroke-linecap="round" />
+            </svg>
+            <input
+              type="search"
+              id="librarySearchInput"
+              class="library-search-input"
+              placeholder="Search exercise name, muscle (e.g. chest, glutes, lats), or cue..."
+              autocomplete="off"
+            />
+            <button id="clearLibrarySearchBtn" class="clear-search-btn hidden" type="button" aria-label="Clear search">✕</button>
+          </div>
+
+          <!-- 5 Equipment Sections Filter Bar -->
+          <div class="filter-group-block">
+            <span class="filter-group-label">EQUIPMENT SECTION (5 SECTIONS)</span>
+            <div id="libraryCategoryTabs" class="library-filter-pills" role="group" aria-label="Filter by Equipment Section">
+              <button type="button" class="lib-filter-pill active" data-lib-cat="all">All 5 Sections (24)</button>
+              <button type="button" class="lib-filter-pill" data-lib-cat="dumbbell">🏋️ Dumbbell (8)</button>
+              <button type="button" class="lib-filter-pill" data-lib-cat="barbell">🧱 Barbell (5)</button>
+              <button type="button" class="lib-filter-pill" data-lib-cat="kettlebell">🔔 Kettlebell (4)</button>
+              <button type="button" class="lib-filter-pill" data-lib-cat="bodyweight">🤸 Bodyweight (5)</button>
+              <button type="button" class="lib-filter-pill" data-lib-cat="other">⚙️ Other Equipment (4)</button>
+            </div>
+          </div>
+
+          <!-- Movement Mechanic & Difficulty Filters -->
+          <div class="filter-row-split">
+            <div class="filter-group-block">
+              <span class="filter-group-label">MOVEMENT MECHANIC</span>
+              <div id="libraryMechanicPills" class="library-filter-pills" role="group" aria-label="Filter by Mechanic">
+                <button type="button" class="lib-filter-pill active" data-lib-mech="all">All</button>
+                <button type="button" class="lib-filter-pill" data-lib-mech="Compound">Compound</button>
+                <button type="button" class="lib-filter-pill" data-lib-mech="Isolation">Isolation</button>
+                <button type="button" class="lib-filter-pill" data-lib-mech="Core & Mobility">Core &amp; Mobility</button>
+              </div>
+            </div>
+
+            <div class="filter-group-block">
+              <span class="filter-group-label">DIFFICULTY LEVEL</span>
+              <div id="libraryDifficultyPills" class="library-filter-pills" role="group" aria-label="Filter by Difficulty">
+                <button type="button" class="lib-filter-pill active" data-lib-diff="all">All Levels</button>
+                <button type="button" class="lib-filter-pill" data-lib-diff="Beginner">Beginner</button>
+                <button type="button" class="lib-filter-pill" data-lib-diff="Intermediate">Intermediate</button>
+                <button type="button" class="lib-filter-pill" data-lib-diff="Advanced">Advanced</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active Mannequin Muscle Selection & Filter Summary Bar -->
+          <div class="library-status-bar">
+            <div class="active-dummy-filters-wrap">
+              <span class="status-count-text" id="libraryMatchCountText">Showing all 26 exercises across 5 sections</span>
+              <div id="activeDummyMuscleChips" class="active-dummy-chips"></div>
+            </div>
+            <button id="resetAllLibraryFiltersBtn" class="btn-secondary btn-xs" type="button">
+              ↺ Reset All Filters
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5 Equipment Sections Container (Dumbbell, Barbell, Kettlebell, Bodyweight, Other Equipment) -->
+      <div id="librarySectionsContainer" class="library-sections-stack">
+        <!-- Populated dynamically by script.js -->
+      </div>
+    </div>
+  </main>
+
+  <!-- Interactive 360° 3D Biomechanics Studio Modal -->
+  <div id="modal3DStudio" class="modal-3d-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal3DTitle">
+    <div class="modal-3d-dialog">
+      <div class="modal-3d-header">
+        <div>
+          <span id="modal3DOrderBadge" class="exercise-order-badge">360° 3D ANATOMICAL STUDIO</span>
+          <h2 id="modal3DTitle" class="modal-3d-title">Exercise Name</h2>
+        </div>
+        <button id="closeModal3DBtn" class="btn-secondary btn-sm" type="button" aria-label="Close 3D Studio">
+          ✕ Close
+        </button>
+      </div>
+
+      <div class="modal-3d-body">
+        <div class="modal-3d-stage-wrap">
+          <canvas id="modal3DCanvas" class="modal-3d-canvas" data-modal-viewer="true"></canvas>
+
+          <!-- Camera Angle & Turntable Controls -->
+          <div class="modal-3d-controls-bar">
+            <div class="modal-3d-overlay-top">
+              <span class="drag-hint-pill">🖱️ / 👆 Drag 3D canvas to orbit 360° · Hover muscle to inspect</span>
+              <span id="modal3DAngleBadge" class="angle-readout-pill">Yaw: 38°</span>
+            </div>
+            <div class="cam-preset-group" role="group" aria-label="3D Camera Angles">
+              <button type="button" class="cam-btn" data-modal-cam="38,14">45° Iso</button>
+              <button type="button" class="cam-btn" data-modal-cam="0,10">Side Profile</button>
+              <button type="button" class="cam-btn" data-modal-cam="90,10">Front View</button>
+              <button type="button" class="cam-btn" data-modal-cam="270,10">Back View</button>
+              <button type="button" class="cam-btn" data-modal-cam="38,58">Top-Down</button>
+              <button type="button" id="modalSpinToggleBtn" class="cam-btn cam-btn-spin active">↻ Auto-Spin 360°</button>
+            </div>
+
+            <div class="scrubber-row">
+              <button type="button" id="modalSpeedBtn" class="cam-btn">Speed: 1x</button>
+              <button type="button" id="modalPauseBtn" class="cam-btn">⏸ Pause</button>
+              <label class="scrubber-label" for="modalRepScrubber">
+                <span>Scrub Rep:</span>
+                <input type="range" id="modalRepScrubber" min="0" max="100" value="0" />
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class=" modal-3d-sidebar">
+          <div class="sidebar-block">
+            <h4 class="sidebar-heading">Glowing Target Muscles (Hover to Isolate)</h4>
+            <div id="modal3DMuscles" class="muscle-tags"></div>
+          </div>
+          <div class="sidebar-block">
+            <h4 class="sidebar-heading">360° Form Checklist</h4>
+            <ul id="modal3DCues" class="form-cues-list"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- How to Use / Interactive Tutorial Modal -->
+  <div id="tutorialModal" class="modal-3d-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tutorialModalTitle">
+    <div class="tutorial-dialog">
+      <div class="modal-3d-header">
+        <div>
+          <span class="exercise-order-badge">QUICK START &amp; INTERACTIVE GUIDE</span>
+          <h2 id="tutorialModalTitle" class="modal-3d-title">How to Use PulseLift 3D</h2>
+        </div>
+        <button id="closeTutorialBtn" class="btn-secondary btn-sm" type="button" aria-label="Close Tutorial">
+          ✕ Close
+        </button>
+      </div>
+
+      <div class="tutorial-body">
+        <div class="tutorial-steps-grid">
+          <div class="tutorial-step-card">
+            <div class="step-num-badge">STEP 1</div>
+            <h3 class="step-card-title">🎯 Hover Any Muscle to See Its Name</h3>
+            <p class="step-card-desc">
+              To keep the 3D display clean and uncluttered, muscle labels stay hidden until you need them.
+              <strong>Move your cursor directly over any muscle on the 3D body</strong> (or hover a muscle pill badge) to spotlight that muscle and pop up its exact anatomical name and role!
+            </p>
+          </div>
+
+          <div class="tutorial-step-card">
+            <div class="step-num-badge">STEP 2</div>
+            <h3 class="step-card-title">🔄 360° Orbit &amp; Studio Rep Scrubber</h3>
+            <p class="step-card-desc">
+              <strong>Click &amp; drag left/right</strong> on any 3D model to inspect spinal alignment and joint angles from 360°.
+              Use quick presets (<code>45°</code>, <code>Side</code>, <code>Front</code>, <code>Back</code>, <code>↻ 360°</code>) or click <strong>⤢ 360° Studio</strong> to use <strong>0.5x Slow-Mo</strong> and scrub the rep from <code>0%</code> to <code>100%</code>.
+            </p>
+          </div>
+
+          <div class="tutorial-step-card">
+            <div class="step-num-badge">STEP 3</div>
+            <h3 class="step-card-title">📅 Alternating 2-Day Full-Body Split</h3>
+            <p class="step-card-desc">
+              Switch between <strong>Day A</strong> (Goblet Squat, Floor Press, Bent-Over Row, Core Decompression) and <strong>Day B</strong> (RDL, Overhead Press, Reverse Lunge, Spinal Hang).
+              Perform 3–4 sessions per week with 1 rest day between workouts.
+            </p>
+          </div>
+
+          <div class="tutorial-step-card">
+            <div class="step-num-badge">STEP 4</div>
+            <h3 class="step-card-title">🏋️ Log Weights (kg), Reps &amp; Set Pills</h3>
+            <p class="step-card-desc">
+              Enter your dumbbell weight (<code>kg</code>) and completed reps for Sets 1, 2, and 3.
+              Click <strong>Set 1 / Set 2 / Set 3</strong> (or the <code>✓</code> button) to mark sets complete—everything saves automatically to <code>localStorage</code>. Click <strong>Save Workout Log</strong> to archive your session in <strong>History</strong>.
+            </p>
+          </div>
+
+          <div class="tutorial-step-card">
+            <div class="step-num-badge">STEP 5</div>
+            <h3 class="step-card-title">⏱️ Auto-Rest Timer &amp; 8-Bit Chime</h3>
+            <p class="step-card-desc">
+              Checking off a set automatically starts the recommended recovery countdown (<strong>90s</strong> for compounds, <strong>60s</strong> for upper/lunges, <strong>3m</strong> for decompression/hang).
+              When the timer hits <code>00:00</code>, it flashes and plays a Web Audio <strong>8-bit victory chime</strong>.
+            </p>
+          </div>
+
+          <div class="tutorial-step-card">
+            <div class="step-num-badge">STEP 6</div>
+            <h3 class="step-card-title">📱 Offline PWA &amp; Clinical View</h3>
+            <p class="step-card-desc">
+              Click <strong>☀️/🌙</strong> on any 3D viewport to toggle between Dark Studio and White Clinical Ecorché mode.
+              Because PulseLift 3D uses a Service Worker, it works <strong>100% offline</strong> and can be installed as an app on your phone or desktop.
+            </p>
+          </div>
+        </div>
+
+        <div class="tutorial-footer">
+          <p class="tutorial-tip">💡 <strong>Pro Tip:</strong> Want a live walkthrough? Click <strong>Start Guided Spotlight Tour</strong> below to highlight each control on your screen.</p>
+          <div class="tutorial-footer-btns">
+            <button id="startGuidedTourBtn" class="btn-accent btn-sm" type="button">
+              ▶ Start Guided Spotlight Tour
+            </button>
+            <button id="gotItTutorialBtn" class="btn-secondary btn-sm" type="button">
+              Got It, Let’s Lift!
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Guided Tour Floating Callout Card -->
+  <div id="guidedTourPopover" class="guided-tour-popover hidden" role="dialog" aria-live="polite">
+    <div class="tour-popover-header">
+      <span id="tourStepCounter" class="tour-step-badge">TOUR 1 / 4</span>
+      <button id="tourCloseBtn" class="tour-close-x" type="button" title="End Tour">✕</button>
+    </div>
+    <h4 id="tourStepTitle" class="tour-step-title">Step Title</h4>
+    <p id="tourStepText" class="tour-step-text">Step description.</p>
+    <div class="tour-popover-actions">
+      <button id="tourPrevBtn" class="btn-ghost btn-xs" type="button">← Back</button>
+      <button id="tourNextBtn" class="btn-accent btn-xs" type="button">Next →</button>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toastBanner" class="toast-banner" role="status" aria-live="polite"></div>
+
+  <!-- Floating / Sticky Rest & Recovery Timer Widget -->
+  <aside id="restTimerWidget" class="timer-widget" aria-label="Rest and Recovery Countdown Timer">
+    <div class="timer-widget-inner">
+      <!-- Left: Countdown Ring + Display + Play/Reset -->
+      <div class="timer-display-group">
+        <div class="timer-ring-wrap">
+          <svg class="timer-ring-svg" viewBox="0 0 64 64" width="58" height="58">
+            <circle class="timer-ring-bg" cx="32" cy="32" r="27" />
+            <circle id="timerRingProgress" class="timer-ring-fg" cx="32" cy="32" r="27" stroke-dasharray="169.65" stroke-dashoffset="0" />
+          </svg>
+          <button id="timerPlayPauseBtn" class="timer-play-btn" type="button" aria-label="Start or Pause Timer" title="Start / Pause Timer">
+            <svg id="playIcon" viewBox="0 0 20 20" width="18" height="18" fill="currentColor">
+              <path d="M6.5 4.5l9 5.5-9 5.5V4.5z" />
+            </svg>
+            <svg id="pauseIcon" class="hidden" viewBox="0 0 20 20" width="18" height="18" fill="currentColor">
+              <rect x="5" y="4" width="3.5" height="12" rx="1" />
+              <rect x="11.5" y="4" width="3.5" height="12" rx="1" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="timer-readout">
+          <div class="timer-label-row">
+            <span id="timerModeLabel" class="timer-mode-label">REST TIMER · COMPOUND</span>
+            <button id="soundToggleBtn" class="sound-toggle-btn" type="button" title="Toggle 8-Bit Chime Sound">
+              <span id="soundIconOn">🔊 8-Bit</span>
+              <span id="soundIconOff" class="hidden">🔇 Muted</span>
+            </button>
+          </div>
+          <div class="timer-time-row">
+            <span id="timerDisplay" class="timer-digits" role="timer" aria-live="off">01:30</span>
+            <div class="timer-nudge-btns">
+              <button id="timerMinus15Btn" class="btn-nudge" type="button" title="Subtract 15 seconds">-15s</button>
+              <button id="timerPlus15Btn" class="btn-nudge" type="button" title="Add 15 seconds">+15s</button>
+              <button id="timerResetBtn" class="btn-nudge" type="button" title="Reset timer">↺</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Quick-Select Preset Buttons -->
+      <div class="timer-presets" role="group" aria-label="Quick Timer Presets">
+        <button class="preset-btn active" data-seconds="90" data-label="REST TIMER · COMPOUND (90s)" type="button">
+          <span class="preset-time">90s</span>
+          <span class="preset-sub">Compound</span>
+        </button>
+        <button class="preset-btn" data-seconds="60" data-label="REST TIMER · UPPER / LUNGES (60s)" type="button">
+          <span class="preset-time">60s</span>
+          <span class="preset-sub">Upper / Lunges</span>
+        </button>
+        <button class="preset-btn" data-seconds="180" data-label="RECOVERY · DECOMPRESS / HANG (3m)" type="button">
+          <span class="preset-time">3m</span>
+          <span class="preset-sub">Decompress</span>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <script src="anatomical3d.js?v=13"></script>
+  <script src="script.js?v=13"></script>
+</body>
+</html>
