@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pulselift-workout-v13';
+const CACHE_NAME = 'pulselift-workout-v19';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -44,22 +44,28 @@ self.addEventListener('activate', (event) => {
       .then(() => self.clients.claim())
       .then(() => self.clients.matchAll({ type: 'window' }))
       .then((clients) => {
-        return Promise.all(
-          clients.map((client) => {
-            client.postMessage({ type: 'SW_UPDATED', version: CACHE_NAME });
-            if ('navigate' in client) {
-              return client.navigate(client.url).catch(() => {});
-            }
-          })
-        );
+        clients.forEach((client) => {
+          // Notify active tabs so they flush their backup vault before any reload
+          client.postMessage({ type: 'SW_UPDATED', version: CACHE_NAME });
+        });
       })
   );
 });
 
 // Network-first strategy so local development & updates always serve the latest code immediately,
-// while falling back to the cached copy when offline.
+// while falling back to the cached copy when offline. Never cache backup endpoints.
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
+  const reqUrl = new URL(event.request.url);
+  if (
+    reqUrl.pathname.includes('/api/backup') ||
+    reqUrl.pathname.endsWith('workout-backup.json') ||
+    reqUrl.pathname.includes('/backups/')
+  ) {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    return;
+  }
 
   event.respondWith(
     fetch(event.request, { cache: 'no-store' })

@@ -11,7 +11,7 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/svg+xml" href="icon.svg" />
   <link rel="apple-touch-icon" href="icon.svg" />
-  <link rel="stylesheet" href="style.css?v=13" />
+  <link rel="stylesheet" href="style.css?v=19" />
 </head>
 <body>
   <!-- Full-screen Visual Alert Flash Overlay when Timer hits 00:00 -->
@@ -53,12 +53,25 @@
           </svg>
           <span>2-Day Routine</span>
         </button>
+        <button id="navPlannerPageBtn" class="page-nav-btn" type="button" data-page="planner">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 6h12M4 10h8m-8 4h12M15 9l2 2-2 2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Plan Builder &amp; Coach</span>
+        </button>
         <button id="navLibraryPageBtn" class="page-nav-btn" type="button" data-page="library">
           <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M4 4h5v5H4V4zm7 0h5v5h-5V4zM4 11h5v5H4v-5zm7 0h5v5h-5v-5z" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <span>Exercise Library</span>
-          <span class="nav-pill-count">24</span>
+          <span class="nav-pill-count">165</span>
+        </button>
+        <button id="navHistoryPageBtn" class="page-nav-btn" type="button" data-page="history">
+          <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 15V9m4 6V5m4 10v-4m4 4V7" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>History &amp; Analysis</span>
+          <span id="navHistoryCountBadge" class="nav-pill-count">0</span>
         </button>
       </nav>
 
@@ -89,6 +102,21 @@
   </header>
 
   <main class="app-main">
+    <!-- Collapsible Workout History Panel (Accessible from any page) -->
+    <section id="historyDrawer" class="history-panel hidden" aria-label="Workout History Log">
+      <div class="history-header">
+        <div>
+          <h3 class="history-title">Saved Workout History</h3>
+          <p class="history-subtitle">Auto-backed up across Disk (<code>workout-backup.json</code>), <code>IndexedDB</code> &amp; <code>localStorage</code></p>
+        </div>
+        <div class="history-header-actions">
+          <button id="clearHistoryBtn" class="btn-danger-outline btn-xs" type="button">Clear History</button>
+          <button id="closeHistoryBtn" class="btn-ghost btn-xs" type="button">Close</button>
+        </div>
+      </div>
+      <div id="historyList" class="history-list"></div>
+    </section>
+
     <!-- PAGE 1: 2-Day Workout Routine Tracker -->
     <div id="trackerPageView" class="page-view">
     <!-- Day Switcher & Session Progress Bar -->
@@ -158,6 +186,12 @@
           </div>
 
           <div class="overview-buttons">
+            <button id="togglePlanAssistantBtn" class="btn-ghost btn-sm" type="button" title="Open the dedicated Plan Builder & Moderate Coach page">
+              <span>🧭 Edit Plan A/B &amp; Coach →</span>
+            </button>
+            <button id="openBackfillModalBtn" class="btn-ghost btn-sm forgot-data-trigger-btn" type="button" title="Forgot to key in a past workout? Click to pop out the Quick-Log & Backfill window">
+              <span>📅 Forgot to key in data?</span>
+            </button>
             <button id="logWorkoutBtn" class="btn-accent btn-sm" type="button" title="Save current workout snapshot to History">
               <svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M5 10l3.5 3.5L15 7" stroke-linecap="round" stroke-linejoin="round"/>
@@ -175,25 +209,17 @@
       </div>
     </section>
 
-    <!-- Collapsible Workout History Panel -->
-    <section id="historyDrawer" class="history-panel hidden" aria-label="Workout History Log">
-      <div class="history-header">
-        <div>
-          <h3 class="history-title">Saved Workout History</h3>
-          <p class="history-subtitle">Stored locally on your device via <code>localStorage</code></p>
-        </div>
-        <div class="history-header-actions">
-          <button id="clearHistoryBtn" class="btn-danger-outline btn-xs" type="button">Clear History</button>
-          <button id="closeHistoryBtn" class="btn-ghost btn-xs" type="button">Close</button>
-        </div>
-      </div>
-      <div id="historyList" class="history-list"></div>
-    </section>
-
     <!-- Exercise Cards Grid -->
     <section id="workoutContainer" class="exercise-grid" role="tabpanel" aria-live="polite">
       <!-- Populated dynamically by script.js -->
     </section>
+    </div>
+
+    <!-- PAGE 2: Dedicated Plan Builder & Moderate Workout Coach Page -->
+    <div id="plannerPageView" class="page-view hidden" aria-label="Day A and Day B Plan Rearranger and Moderate Workout Coach">
+      <div id="moderateCoachWidget" class="plan-builder-page" aria-live="polite">
+        <!-- Populated dynamically by renderModerateCoachWidget() in script.js -->
+      </div>
     </div>
 
     <!-- PAGE 2: Exercise Library (5 Equipment Sections + Interactive GUI Muscle Mannequin Filter) -->
@@ -454,6 +480,13 @@
         <!-- Populated dynamically by script.js -->
       </div>
     </div>
+
+    <!-- PAGE 3: Workout History & Plan A / Plan B Schedule Analysis -->
+    <div id="historyPageView" class="page-view hidden" aria-label="Workout History and Plan A/B Analysis">
+      <div id="historyAnalysisPageContainer" class="history-analysis-page">
+        <!-- Populated dynamically by renderHistoryAnalysisPage() in script.js -->
+      </div>
+    </div>
   </main>
 
   <!-- Interactive 360° 3D Biomechanics Studio Modal -->
@@ -598,6 +631,24 @@
     </div>
   </div>
 
+  <!-- Forgot to Key In Data? Pop-Out Quick-Log & Backfill Modal -->
+  <div id="backfillWorkoutModal" class="modal-3d-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="backfillModalTitle">
+    <div class="backfill-modal-dialog">
+      <div class="modal-3d-header">
+        <div>
+          <span class="exercise-order-badge">MISSED LOGGING A WORKOUT SESSION?</span>
+          <h2 id="backfillModalTitle" class="modal-3d-title">📅 Forgot to Key In Data? — Log a Workout on Any Date</h2>
+        </div>
+        <button id="closeBackfillModalBtn" class="btn-secondary btn-sm" type="button" aria-label="Close Backfill Modal">
+          ✕ Close
+        </button>
+      </div>
+      <div id="backfillModalContent" class="backfill-modal-body">
+        <!-- Populated dynamically by renderBackfillModalContent() in script.js -->
+      </div>
+    </div>
+  </div>
+
   <!-- Guided Tour Floating Callout Card -->
   <div id="guidedTourPopover" class="guided-tour-popover hidden" role="dialog" aria-live="polite">
     <div class="tour-popover-header">
@@ -673,7 +724,7 @@
     </div>
   </aside>
 
-  <script src="anatomical3d.js?v=13"></script>
-  <script src="script.js?v=13"></script>
+  <script src="anatomical3d.js?v=19"></script>
+  <script src="script.js?v=19"></script>
 </body>
 </html>

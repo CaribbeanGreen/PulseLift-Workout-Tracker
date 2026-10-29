@@ -11,6 +11,11 @@
 
 const STORAGE_STATE_KEY = 'pulselift_workout_state_v1';
 const STORAGE_HISTORY_KEY = 'pulselift_workout_history_v1';
+const STORAGE_SHADOW_HISTORY_KEY = 'pulselift_workout_history_shadow_v1';
+const STORAGE_SNAPSHOTS_KEY = 'pulselift_backup_snapshots_v1';
+const WINDOW_NAME_BACKUP_PREFIX = 'PULSELIFT_VAULT_V1:';
+const IDB_DB_NAME = 'PulseLiftVaultDB';
+const IDB_STORE_NAME = 'vault';
 
 /* ==========================================================================
    2-Day Full-Body Workout Program Data (with 3D Muscle Keys)
@@ -285,6 +290,148 @@ function getResolvedExerciseData(ex) {
 /* ==========================================================================
    Application State & LocalStorage Persistence
    ========================================================================== */
+const DEFAULT_AVAILABLE_EQUIPMENT = {
+  dumbbell: true,
+  bodyweight: true,
+  pullup_bar: false,
+  bench: false,
+  bands_cables: false,
+  barbell: false,
+  kettlebell: false
+};
+
+const EQUIPMENT_LABELS = {
+  dumbbell: '🏋️ Dumbbells',
+  bodyweight: '🤸 Bodyweight / Floor',
+  pullup_bar: '🚪 Pull-Up Bar',
+  bench: '🛋️ Workout Bench',
+  bands_cables: '🎗️ Bands / Cables',
+  barbell: '🧱 Barbell',
+  kettlebell: '🔔 Kettlebell'
+};
+
+function getDefaultRoutineOrder() {
+  return {
+    dayA: WORKOUT_PROGRAM.dayA.exercises.map((e) => e.id),
+    dayB: WORKOUT_PROGRAM.dayB.exercises.map((e) => e.id)
+  };
+}
+
+function getInitialTwoDaysHistory() {
+  return [
+    {
+      id: 1792911800000,
+      dayKey: 'dayB',
+      dayTitle: 'Day B Full-Body Routine',
+      isoDate: '2026-10-25',
+      weekdayIdx: 6,
+      timestamp: 'Oct 25, 03:03 PM',
+      completedSets: 12,
+      totalSets: 12,
+      totalVolume: 1080,
+      exercises: [
+        {
+          id: 'rdls',
+          name: 'Romanian Deadlifts (RDLs)',
+          sets: [
+            { completed: true, weight: 20, reps: 10 },
+            { completed: true, weight: 20, reps: 10 },
+            { completed: true, weight: 20, reps: 10 }
+          ]
+        },
+        {
+          id: 'overhead-press',
+          name: 'Dumbbell Overhead Press',
+          sets: [
+            { completed: true, weight: 12, reps: 10 },
+            { completed: true, weight: 12, reps: 10 },
+            { completed: true, weight: 12, reps: 10 }
+          ]
+        },
+        {
+          id: 'reverse-lunges',
+          name: 'Dumbbell Reverse Lunges',
+          sets: [
+            { completed: true, weight: 14, reps: 10 },
+            { completed: true, weight: 14, reps: 10 },
+            { completed: true, weight: 14, reps: 10 }
+          ]
+        },
+        {
+          id: 'core-spinal-hang',
+          name: "Child's Pose & Lat Traction (No Bar)",
+          sets: [
+            { completed: true, weight: 0, reps: 45 },
+            { completed: true, weight: 0, reps: 45 },
+            { completed: true, weight: 0, reps: 45 }
+          ]
+        }
+      ]
+    },
+    {
+      id: 1792858000000,
+      dayKey: 'dayA',
+      dayTitle: 'Day A Full-Body Routine',
+      isoDate: '2026-10-24',
+      weekdayIdx: 5,
+      timestamp: 'Oct 24, 04:10 PM',
+      completedSets: 12,
+      totalSets: 12,
+      totalVolume: 1548,
+      exercises: [
+        {
+          id: 'goblet-squats',
+          name: 'Goblet Squats',
+          sets: [
+            { completed: true, weight: 20, reps: 12 },
+            { completed: true, weight: 20, reps: 12 },
+            { completed: true, weight: 20, reps: 12 }
+          ]
+        },
+        {
+          id: 'floor-press',
+          name: 'Dumbbell Floor Press',
+          sets: [
+            { completed: true, weight: 16, reps: 10 },
+            { completed: true, weight: 16, reps: 10 },
+            { completed: true, weight: 16, reps: 10 }
+          ]
+        },
+        {
+          id: 'bent-over-rows',
+          name: 'Dumbbell Bent-Over Rows',
+          sets: [
+            { completed: true, weight: 16, reps: 10 },
+            { completed: true, weight: 16, reps: 10 },
+            { completed: true, weight: 16, reps: 10 }
+          ]
+        },
+        {
+          id: 'core-decompression',
+          name: 'Core & Post-Workout Decompression',
+          sets: [
+            { completed: true, weight: 0, reps: 45 },
+            { completed: true, weight: 0, reps: 45 },
+            { completed: true, weight: 0, reps: 45 }
+          ]
+        }
+      ]
+    }
+  ];
+}
+
+function isSyntheticDemoEntry(item) {
+  if (!item || typeof item !== 'object') return false;
+  // Detect old populateDemo4WeekSchedule entries (volumes 2840+idx*65 or 2620+idx*55)
+  const vol = Number(item.totalVolume);
+  for (let i = 0; i < 12; i++) {
+    if (vol === 2840 + i * 65 || vol === 2620 + i * 55) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function createDefaultState() {
   const exercisesState = {};
   ['dayA', 'dayB'].forEach((dayKey) => {
@@ -304,44 +451,303 @@ function createDefaultState() {
     activeDay: 'dayA',
     autoStartTimer: true,
     soundEnabled: true,
+    planAssistantOpen: false,
+    autoDownloadBackupOnLog: false,
+    availableEquipment: { ...DEFAULT_AVAILABLE_EQUIPMENT },
+    customRoutine: getDefaultRoutineOrder(),
     exercises: exercisesState
   };
 }
 
+const backupVaultStatus = {
+  diskSynced: false,
+  idbSynced: false,
+  lastSavedAt: null,
+  lastRecoveredCount: 0,
+  lastReason: 'Initial Load'
+};
+
+let backupSnapshots = loadBackupSnapshots();
 let appState = loadAppState();
 let workoutHistory = loadWorkoutHistory();
 
+function mergeWorkoutHistories(...historyArrays) {
+  const byKey = new Map();
+  historyArrays.forEach((arr) => {
+    if (!Array.isArray(arr)) return;
+    arr.forEach((item) => {
+      if (!item || typeof item !== 'object') return;
+      if (isSyntheticDemoEntry(item)) return;
+      const key =
+        item.id !== undefined && item.id !== null
+          ? String(item.id)
+          : `${item.isoDate || ''}_${item.dayKey || ''}_${item.timestamp || ''}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, item);
+      }
+    });
+  });
+  return Array.from(byKey.values())
+    .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))
+    .slice(0, 120);
+}
+
+function loadBackupSnapshots() {
+  try {
+    const raw = localStorage.getItem(STORAGE_SNAPSHOTS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function saveBackupSnapshotsList() {
+  try {
+    localStorage.setItem(STORAGE_SNAPSHOTS_KEY, JSON.stringify(backupSnapshots.slice(0, 15)));
+  } catch (err) {
+    console.warn('Could not save backup snapshots list:', err);
+  }
+}
+
+function createBackupSnapshot(reasonLabel = 'Auto-Backup Snapshot', historyOverride = null) {
+  const targetHistory = Array.isArray(historyOverride) ? historyOverride : workoutHistory;
+  if (!Array.isArray(targetHistory) || targetHistory.length === 0) return null;
+
+  // Avoid duplicate consecutive snapshot if session count and latest ID are identical
+  const topSnap = backupSnapshots[0];
+  const latestEntryId = targetHistory[0] ? targetHistory[0].id : null;
+  if (
+    topSnap &&
+    topSnap.sessionCount === targetHistory.length &&
+    topSnap.latestEntryId === latestEntryId &&
+    reasonLabel === 'Auto-Sync'
+  ) {
+    return topSnap;
+  }
+
+  const now = new Date();
+  const snap = {
+    snapshotId: `snap-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    createdAt: now.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    }),
+    createdAtMs: Date.now(),
+    reason: reasonLabel,
+    sessionCount: targetHistory.length,
+    latestEntryId,
+    customRoutine: appState && appState.customRoutine ? JSON.parse(JSON.stringify(appState.customRoutine)) : null,
+    workoutHistory: JSON.parse(JSON.stringify(targetHistory))
+  };
+
+  backupSnapshots.unshift(snap);
+  if (backupSnapshots.length > 15) {
+    backupSnapshots = backupSnapshots.slice(0, 15);
+  }
+  saveBackupSnapshotsList();
+  return snap;
+}
+
+function writeWindowNameVault() {
+  try {
+    const payload = {
+      updatedAtMs: Date.now(),
+      appState,
+      workoutHistory,
+      snapshots: backupSnapshots.slice(0, 5)
+    };
+    window.name = WINDOW_NAME_BACKUP_PREFIX + JSON.stringify(payload);
+  } catch (_) {}
+}
+
+function readWindowNameVault() {
+  try {
+    if (typeof window.name === 'string' && window.name.startsWith(WINDOW_NAME_BACKUP_PREFIX)) {
+      const jsonStr = window.name.slice(WINDOW_NAME_BACKUP_PREFIX.length);
+      return JSON.parse(jsonStr);
+    }
+  } catch (_) {}
+  return null;
+}
+
+function openVaultIndexedDB() {
+  return new Promise((resolve) => {
+    if (!('indexedDB' in window)) {
+      resolve(null);
+      return;
+    }
+    try {
+      const req = indexedDB.open(IDB_DB_NAME, 1);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(IDB_STORE_NAME)) {
+          db.createObjectStore(IDB_STORE_NAME);
+        }
+      };
+      req.onsuccess = (e) => resolve(e.target.result);
+      req.onerror = () => resolve(null);
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+async function writeVaultIndexedDB() {
+  const db = await openVaultIndexedDB();
+  if (!db) return false;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE_NAME, 'readwrite');
+      const store = tx.objectStore(IDB_STORE_NAME);
+      store.put(
+        {
+          updatedAtMs: Date.now(),
+          updatedAt: new Date().toISOString(),
+          appState,
+          workoutHistory,
+          snapshots: backupSnapshots.slice(0, 12)
+        },
+        'latest'
+      );
+      tx.oncomplete = () => {
+        backupVaultStatus.idbSynced = true;
+        resolve(true);
+      };
+      tx.onerror = () => resolve(false);
+    } catch (_) {
+      resolve(false);
+    }
+  });
+}
+
+async function readVaultIndexedDB() {
+  const db = await openVaultIndexedDB();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE_NAME, 'readonly');
+      const store = tx.objectStore(IDB_STORE_NAME);
+      const req = store.get('latest');
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+async function syncBackupToDiskServer(options = {}) {
+  try {
+    const res = await fetch('./api/backup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reason: options.reason || 'auto-sync',
+        allowEmptyOverwrite: Boolean(options.allowEmptyOverwrite),
+        replaceExactHistory: Boolean(options.replaceExactHistory),
+        appState,
+        workoutHistory,
+        snapshots: backupSnapshots.slice(0, 12)
+      })
+    });
+    if (res && res.ok) {
+      const data = await res.json();
+      backupVaultStatus.diskSynced = true;
+      backupVaultStatus.lastSavedAt = new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+      // If disk had additional historical sessions that weren't in memory yet, merge them seamlessly
+      if (
+        !options.allowEmptyOverwrite &&
+        !options.replaceExactHistory &&
+        Array.isArray(data.workoutHistory) &&
+        data.workoutHistory.length > workoutHistory.length
+      ) {
+        workoutHistory = mergeWorkoutHistories(workoutHistory, data.workoutHistory);
+        localStorage.setItem(STORAGE_HISTORY_KEY, JSON.stringify(workoutHistory));
+        localStorage.setItem(STORAGE_SHADOW_HISTORY_KEY, JSON.stringify(workoutHistory));
+        renderHistoryPanel();
+      }
+      return true;
+    }
+  } catch (_) {
+    backupVaultStatus.diskSynced = false;
+  }
+  return false;
+}
+
 function loadAppState() {
   try {
-    const raw = localStorage.getItem(STORAGE_STATE_KEY);
+    let raw = localStorage.getItem(STORAGE_STATE_KEY);
+    if (!raw) {
+      const winVault = readWindowNameVault();
+      if (winVault && winVault.appState) {
+        raw = JSON.stringify(winVault.appState);
+      }
+    }
     if (!raw) return createDefaultState();
     const parsed = JSON.parse(raw);
     const defaults = createDefaultState();
     const mergedExercises = { ...defaults.exercises };
     if (parsed.exercises) {
-      Object.keys(mergedExercises).forEach((exId) => {
-        if (parsed.exercises[exId]) {
-          if (parsed.exercises[exId].variantKey) {
-            mergedExercises[exId].variantKey = parsed.exercises[exId].variantKey;
-          }
-          if (Array.isArray(parsed.exercises[exId].sets)) {
-            mergedExercises[exId].sets = mergedExercises[exId].sets.map((defSet, idx) => {
-              const savedSet = parsed.exercises[exId].sets[idx];
-              if (!savedSet) return defSet;
-              return {
-                completed: Boolean(savedSet.completed),
-                weight: savedSet.weight !== undefined ? Number(savedSet.weight) : defSet.weight,
-                reps: savedSet.reps !== undefined ? Number(savedSet.reps) : defSet.reps
-              };
-            });
-          }
-        }
+      Object.keys(parsed.exercises).forEach((exId) => {
+        const savedEx = parsed.exercises[exId];
+        if (!savedEx) return;
+        const baseSets = mergedExercises[exId]
+          ? mergedExercises[exId].sets
+          : [
+              { completed: false, weight: 12, reps: 10 },
+              { completed: false, weight: 12, reps: 10 },
+              { completed: false, weight: 12, reps: 10 }
+            ];
+        mergedExercises[exId] = {
+          variantKey: savedEx.variantKey || (mergedExercises[exId] && mergedExercises[exId].variantKey) || null,
+          sets: Array.isArray(savedEx.sets)
+            ? baseSets.map((defSet, idx) => {
+                const savedSet = savedEx.sets[idx];
+                if (!savedSet) return defSet;
+                return {
+                  completed: Boolean(savedSet.completed),
+                  weight: savedSet.weight !== undefined ? Number(savedSet.weight) : defSet.weight,
+                  reps: savedSet.reps !== undefined ? Number(savedSet.reps) : defSet.reps
+                };
+              })
+            : baseSets
+        };
       });
     }
+    const defOrder = getDefaultRoutineOrder();
+    const customRoutine = {
+      dayA:
+        parsed.customRoutine && Array.isArray(parsed.customRoutine.dayA) && parsed.customRoutine.dayA.length > 0
+          ? parsed.customRoutine.dayA
+          : defOrder.dayA,
+      dayB:
+        parsed.customRoutine && Array.isArray(parsed.customRoutine.dayB) && parsed.customRoutine.dayB.length > 0
+          ? parsed.customRoutine.dayB
+          : defOrder.dayB
+    };
+    const availableEquipment = {
+      ...DEFAULT_AVAILABLE_EQUIPMENT,
+      ...(parsed.availableEquipment && typeof parsed.availableEquipment === 'object'
+        ? parsed.availableEquipment
+        : {})
+    };
     return {
       activeDay: parsed.activeDay === 'dayB' ? 'dayB' : 'dayA',
       autoStartTimer: parsed.autoStartTimer !== undefined ? Boolean(parsed.autoStartTimer) : true,
       soundEnabled: parsed.soundEnabled !== undefined ? Boolean(parsed.soundEnabled) : true,
+      planAssistantOpen: Boolean(parsed.planAssistantOpen),
+      autoDownloadBackupOnLog: Boolean(parsed.autoDownloadBackupOnLog),
+      availableEquipment,
+      customRoutine,
       exercises: mergedExercises
     };
   } catch (err) {
@@ -353,29 +759,262 @@ function loadAppState() {
 function saveAppState() {
   try {
     localStorage.setItem(STORAGE_STATE_KEY, JSON.stringify(appState));
+    writeWindowNameVault();
+    writeVaultIndexedDB();
+    syncBackupToDiskServer({ reason: 'state-update' });
   } catch (err) {
     console.warn('Failed to persist workout state to localStorage:', err);
   }
 }
 
 function loadWorkoutHistory() {
+  let primaryList = [];
+  let shadowList = [];
   try {
     const raw = localStorage.getItem(STORAGE_HISTORY_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    return [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) primaryList = parsed.filter((x) => !isSyntheticDemoEntry(x));
+    }
+  } catch (_) {}
+
+  try {
+    const rawShadow = localStorage.getItem(STORAGE_SHADOW_HISTORY_KEY);
+    if (rawShadow) {
+      const parsedShadow = JSON.parse(rawShadow);
+      if (Array.isArray(parsedShadow)) shadowList = parsedShadow.filter((x) => !isSyntheticDemoEntry(x));
+    }
+  } catch (_) {}
+
+  const winVault = readWindowNameVault();
+  const winList =
+    winVault && Array.isArray(winVault.workoutHistory)
+      ? winVault.workoutHistory.filter((x) => !isSyntheticDemoEntry(x))
+      : [];
+
+  const merged = mergeWorkoutHistories(primaryList, shadowList, winList);
+  if (merged.length === 0) {
+    const twoDaySeed = getInitialTwoDaysHistory();
+    try {
+      localStorage.setItem(STORAGE_HISTORY_KEY, JSON.stringify(twoDaySeed));
+      localStorage.setItem(STORAGE_SHADOW_HISTORY_KEY, JSON.stringify(twoDaySeed));
+    } catch (_) {}
+    return twoDaySeed;
   }
+
+  return merged;
 }
 
-function saveWorkoutHistory() {
+function saveWorkoutHistory(options = {}) {
+  const reason = options.reason || 'Auto-Sync';
+  const allowEmptyOverwrite = Boolean(options.allowEmptyOverwrite);
+  const replaceExactHistory = Boolean(options.replaceExactHistory);
+
   try {
     localStorage.setItem(STORAGE_HISTORY_KEY, JSON.stringify(workoutHistory));
+    if (workoutHistory.length > 0 || allowEmptyOverwrite) {
+      localStorage.setItem(STORAGE_SHADOW_HISTORY_KEY, JSON.stringify(workoutHistory));
+    }
+    if (workoutHistory.length > 0 && reason !== 'silent-merge') {
+      createBackupSnapshot(reason);
+    }
+    backupVaultStatus.lastSavedAt = new Date().toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    backupVaultStatus.lastReason = reason;
+    writeWindowNameVault();
+    writeVaultIndexedDB();
+    syncBackupToDiskServer({ reason, allowEmptyOverwrite, replaceExactHistory });
   } catch (err) {
     console.warn('Failed to save workout history:', err);
   }
 }
+
+async function initAutoBackupAndRecovery(manualTrigger = false) {
+  const initialCount = workoutHistory.length;
+  let idbData = null;
+  let diskData = null;
+
+  try {
+    idbData = await readVaultIndexedDB();
+    if (idbData) backupVaultStatus.idbSynced = true;
+  } catch (_) {}
+
+  try {
+    const res = await fetch('./api/backup', { cache: 'no-store' });
+    if (res && res.ok) {
+      diskData = await res.json();
+      backupVaultStatus.diskSynced = true;
+    }
+  } catch (_) {
+    try {
+      const fallbackRes = await fetch('./workout-backup.json', { cache: 'no-store' });
+      if (fallbackRes && fallbackRes.ok) {
+        diskData = await fallbackRes.json();
+      }
+    } catch (__) {}
+  }
+
+  const idbHistory = idbData && Array.isArray(idbData.workoutHistory) ? idbData.workoutHistory : [];
+  const diskHistory = diskData && Array.isArray(diskData.workoutHistory) ? diskData.workoutHistory : [];
+  const winVault = readWindowNameVault();
+  const winHistory = winVault && Array.isArray(winVault.workoutHistory) ? winVault.workoutHistory : [];
+
+  // Merge snapshots from IndexedDB and Disk so restore points are never lost
+  const allSnapshotsMap = new Map();
+  [
+    ...(backupSnapshots || []),
+    ...(idbData && Array.isArray(idbData.snapshots) ? idbData.snapshots : []),
+    ...(diskData && Array.isArray(diskData.snapshots) ? diskData.snapshots : [])
+  ].forEach((s) => {
+    if (s && s.snapshotId && Array.isArray(s.workoutHistory)) {
+      allSnapshotsMap.set(s.snapshotId, s);
+    }
+  });
+  backupSnapshots = Array.from(allSnapshotsMap.values())
+    .sort((a, b) => Number(b.createdAtMs || 0) - Number(a.createdAtMs || 0))
+    .slice(0, 15);
+  saveBackupSnapshotsList();
+
+  // Also check top snapshot if current workoutHistory is empty
+  const topSnapHistory =
+    workoutHistory.length === 0 &&
+    idbHistory.length === 0 &&
+    diskHistory.length === 0 &&
+    backupSnapshots[0] &&
+    Array.isArray(backupSnapshots[0].workoutHistory)
+      ? backupSnapshots[0].workoutHistory
+      : [];
+
+  const mergedHistory = mergeWorkoutHistories(
+    workoutHistory,
+    idbHistory,
+    diskHistory,
+    winHistory,
+    topSnapHistory
+  );
+
+  const recoveredDelta = mergedHistory.length - initialCount;
+  if (recoveredDelta > 0) {
+    workoutHistory = mergedHistory;
+    backupVaultStatus.lastRecoveredCount = recoveredDelta;
+    saveWorkoutHistory({ reason: 'Auto-Recovered from Vault' });
+    renderHistoryPanel();
+    showToast(`🛡️ Auto-Recovery: Restored ${recoveredDelta} workout session${recoveredDelta === 1 ? '' : 's'} from Backup Vault!`);
+  } else {
+    // Ensure current history is backed up to Disk & IndexedDB on startup
+    if (workoutHistory.length > 0 && backupSnapshots.length === 0) {
+      createBackupSnapshot('Initial Startup Snapshot');
+    }
+    writeWindowNameVault();
+    await writeVaultIndexedDB();
+    await syncBackupToDiskServer({ reason: 'startup-sync' });
+    renderHistoryPanel();
+    if (manualTrigger) {
+      showToast(`🛡️ Backup Vault Verified: ${workoutHistory.length} session${workoutHistory.length === 1 ? '' : 's'} synced across Disk, IndexedDB & LocalStorage.`);
+    }
+  }
+}
+
+function exportBackupJsonFile(customPrefix = 'pulselift-workout-backup') {
+  const payload = {
+    schemaVersion: 1,
+    exportedAt: new Date().toISOString(),
+    appState,
+    workoutHistory,
+    snapshots: backupSnapshots
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `${customPrefix}-${dateStr}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function importBackupJsonData(rawJsonString) {
+  try {
+    const parsed = JSON.parse(rawJsonString);
+    const importedHistory = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed.workoutHistory)
+      ? parsed.workoutHistory
+      : [];
+
+    if (importedHistory.length === 0 && !parsed.appState) {
+      showToast('⚠️ Selected file does not contain valid PulseLift workout history.');
+      return false;
+    }
+
+    createBackupSnapshot('Pre-Import Safety Backup');
+    workoutHistory = mergeWorkoutHistories(workoutHistory, importedHistory);
+
+    if (parsed.appState && typeof parsed.appState === 'object') {
+      if (parsed.appState.customRoutine) {
+        appState.customRoutine = parsed.appState.customRoutine;
+      }
+      if (parsed.appState.exercises) {
+        appState.exercises = { ...appState.exercises, ...parsed.appState.exercises };
+      }
+      saveAppState();
+      updateHeaderAndStats();
+      renderExerciseCards();
+    }
+
+    saveWorkoutHistory({ reason: `Imported Backup (${importedHistory.length} sessions)` });
+    renderHistoryPanel();
+    showToast(`✅ Restored & merged ${importedHistory.length} workout sessions from backup file!`);
+    return true;
+  } catch (err) {
+    showToast('⚠️ Could not parse backup JSON file.');
+    return false;
+  }
+}
+
+function restoreFromSnapshot(snapshotId) {
+  const snap = backupSnapshots.find((s) => s.snapshotId === snapshotId);
+  if (!snap || !Array.isArray(snap.workoutHistory)) {
+    showToast('⚠️ Snapshot not found.');
+    return;
+  }
+  if (workoutHistory.length > 0) {
+    createBackupSnapshot('Pre-Restore Safety Backup');
+  }
+  workoutHistory = JSON.parse(JSON.stringify(snap.workoutHistory));
+  if (snap.customRoutine) {
+    appState.customRoutine = JSON.parse(JSON.stringify(snap.customRoutine));
+    saveAppState();
+    updateHeaderAndStats();
+    renderExerciseCards();
+  }
+  saveWorkoutHistory({
+    reason: `Restored Snapshot (${snap.createdAt})`,
+    replaceExactHistory: true
+  });
+  renderHistoryPanel();
+  showToast(`🛡️ Restored ${workoutHistory.length} sessions from snapshot (${snap.createdAt})!`);
+}
+
+// Listen for Service Worker updates or page unload to immediately flush all backup layers
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'SW_UPDATED') {
+      writeWindowNameVault();
+      writeVaultIndexedDB();
+      syncBackupToDiskServer({ reason: 'pre-sw-update-flush' });
+    }
+  });
+}
+
+window.addEventListener('beforeunload', () => {
+  writeWindowNameVault();
+});
 
 /* ==========================================================================
    Web Audio API — 8-Bit Retro Chime & Sound Effects
@@ -488,14 +1127,664 @@ function showToast(message) {
   }, 2600);
 }
 
+const togglePlanAssistantBtn = document.getElementById('togglePlanAssistantBtn');
+const moderateCoachWidget = document.getElementById('moderateCoachWidget');
+
+/* ==========================================================================
+   Smart Moderate Workout Coach & Day A/B Rearranger Engine
+   ========================================================================== */
+function findRawExerciseById(exId) {
+  for (const dKey of ['dayA', 'dayB']) {
+    const found = WORKOUT_PROGRAM[dKey].exercises.find((x) => x.id === exId);
+    if (found) return found;
+  }
+  if (typeof EXERCISE_LIBRARY_DATA !== 'undefined') {
+    const lib = EXERCISE_LIBRARY_DATA.find((x) => x.id === exId);
+    if (lib) {
+      const isTimeBased = /s\s+(hold|round|walk|carry)/i.test(lib.prescription || '');
+      return {
+        id: lib.id,
+        order: lib.order,
+        name: lib.name,
+        poseId: lib.poseId || lib.id,
+        scheme: lib.prescription || '3 × 10–12',
+        defaultWeight: lib.category === 'bodyweight' || isTimeBased ? 0 : 12,
+        defaultReps: isTimeBased ? 45 : 10,
+        unitOverride: isTimeBased ? 'sec' : undefined,
+        restSeconds: lib.mechanic === 'Compound' ? 90 : lib.mechanic === 'Core & Mobility' ? 120 : 60,
+        restLabel: lib.mechanic === 'Compound' ? '90s Compound' : '60s Moderate',
+        defaultYaw: 40,
+        muscles: lib.muscleDetails || [],
+        cues: lib.cues || [],
+        primaryMuscles: lib.primaryMuscles || [],
+        secondaryMuscles: lib.secondaryMuscles || [],
+        mechanic: lib.mechanic || 'Compound',
+        difficulty: lib.difficulty || 'Beginner'
+      };
+    }
+  }
+  return null;
+}
+
+function ensureExerciseState(ex) {
+  if (!appState.exercises[ex.id]) {
+    appState.exercises[ex.id] = {
+      variantKey: ex.defaultVariantKey || null,
+      sets: [
+        { completed: false, weight: ex.defaultWeight ?? 12, reps: ex.defaultReps ?? 10 },
+        { completed: false, weight: ex.defaultWeight ?? 12, reps: ex.defaultReps ?? 10 },
+        { completed: false, weight: ex.defaultWeight ?? 12, reps: ex.defaultReps ?? 10 }
+      ]
+    };
+  }
+  return appState.exercises[ex.id];
+}
+
+function getDayExercises(dayKey) {
+  const prefix = dayKey === 'dayA' ? 'A' : 'B';
+  const orderList =
+    appState.customRoutine && Array.isArray(appState.customRoutine[dayKey]) && appState.customRoutine[dayKey].length > 0
+      ? appState.customRoutine[dayKey]
+      : WORKOUT_PROGRAM[dayKey].exercises.map((e) => e.id);
+
+  const resolvedList = [];
+  orderList.forEach((exId, idx) => {
+    const raw = findRawExerciseById(exId);
+    if (!raw) return;
+    ensureExerciseState(raw);
+    const resolved = getResolvedExerciseData(raw);
+    resolvedList.push({
+      ...resolved,
+      order: `${prefix}${idx + 1}`,
+      slotIndex: idx
+    });
+  });
+  return resolvedList;
+}
+
+/**
+ * Classifies an exercise into one of the 4 Moderate Full-Body Pillars:
+ * - 'legs' (Lower Body: Quads / Glutes / Hamstrings / Calves)
+ * - 'push' (Upper Push: Chest / Front & Side Delts / Triceps)
+ * - 'pull' (Upper Pull: Lats / Upper Back / Rear Delts / Biceps)
+ * - 'core' (Core & Spinal Decompression / Mobility)
+ */
+function classifyExercisePillar(ex) {
+  const id = (ex.id || '').toLowerCase();
+  if (
+    id.includes('decompress') ||
+    id.includes('spinal-hang') ||
+    id.includes('plank') ||
+    id.includes('deadbug') ||
+    id.includes('bird-dog') ||
+    id.includes('twist') ||
+    id.includes('crunch') ||
+    id.includes('rollout') ||
+    ex.unitOverride === 'sec'
+  ) {
+    return { key: 'core', label: '🧘 Core & Decompress', sequenceRank: 4, spinalLoad: 0.2 };
+  }
+
+  const primaryKeys = (ex.muscles || []).filter((m) => m.primary).map((m) => m.key);
+  const allKeys = (ex.muscles || []).map((m) => m.key);
+  const hasAny = (keys, targets) => keys.some((k) => targets.includes(k));
+
+  if (hasAny(primaryKeys, ['quads', 'glutes', 'hamstrings', 'calves'])) {
+    const isHeavyHingeOrSquat =
+      id.includes('squat') || id.includes('rdl') || id.includes('deadlift') || id.includes('swing');
+    return {
+      key: 'legs',
+      label: '🦵 Lower Body',
+      sequenceRank: 1,
+      spinalLoad: isHeavyHingeOrSquat ? 1.2 : 0.85
+    };
+  }
+  if (hasAny(primaryKeys, ['pecs', 'frontDelts', 'sideDelts', 'triceps'])) {
+    const isCompoundPush = !id.includes('fly') && !id.includes('raise') && !id.includes('tricep');
+    return {
+      key: 'push',
+      label: '🫸 Upper Push',
+      sequenceRank: isCompoundPush ? 2 : 3,
+      spinalLoad: id.includes('overhead') ? 0.8 : 0.45
+    };
+  }
+  if (hasAny(primaryKeys, ['lats', 'upperBack', 'rearDelts', 'biceps', 'forearms'])) {
+    const isCompoundPull = !id.includes('curl') && !id.includes('face-pull') && !id.includes('shrug');
+    return {
+      key: 'pull',
+      label: '🫷 Upper Pull',
+      sequenceRank: isCompoundPull ? 2 : 3,
+      spinalLoad: id.includes('row') ? 0.9 : 0.45
+    };
+  }
+  if (hasAny(allKeys, ['core', 'lowerBack'])) {
+    return { key: 'core', label: '🧘 Core & Decompress', sequenceRank: 4, spinalLoad: 0.25 };
+  }
+  return { key: 'push', label: '🫸 Upper Push', sequenceRank: 2, spinalLoad: 0.5 };
+}
+
+/**
+ * Determines what equipment an exercise (or its active variant) requires.
+ * Returns one of: 'dumbbell' | 'bodyweight' | 'pullup_bar' | 'bench' | 'bands_cables' | 'barbell' | 'kettlebell'
+ */
+function getExerciseEquipmentKey(exOrId) {
+  const ex = typeof exOrId === 'string' ? findRawExerciseById(exOrId) : exOrId;
+  if (!ex) return 'bodyweight';
+  const id = (ex.id || '').toLowerCase();
+
+  // Check B4 Core & Spinal Hang active variant
+  if (id === 'core-spinal-hang') {
+    const st = appState && appState.exercises && appState.exercises['core-spinal-hang'];
+    const vKey = (st && st.variantKey) || ex.activeVariantKey || ex.defaultVariantKey || 'childs-pose';
+    return vKey === 'dead-hang' ? 'pullup_bar' : 'bodyweight';
+  }
+  if (id === 'core-decompression') return 'bodyweight';
+  if (id.includes('pullup') || id.includes('chinup') || id.includes('hanging') || id.includes('muscle-up')) {
+    return 'pullup_bar';
+  }
+  if (id.includes('bench') || id.includes('incline') || id.includes('decline') || id.includes('preacher') || id.includes('pullover') || id.includes('chest-supported') || id.includes('stepup')) {
+    return 'bench';
+  }
+  if (
+    id === 'goblet-squats' ||
+    id === 'floor-press' ||
+    id === 'bent-over-rows' ||
+    id === 'rdls' ||
+    id === 'overhead-press' ||
+    id === 'reverse-lunges' ||
+    id.startsWith('db-')
+  ) {
+    return 'dumbbell';
+  }
+  if (id.startsWith('bb-')) return 'barbell';
+  if (id.startsWith('kb-')) return 'kettlebell';
+  if (id.startsWith('bw-')) return 'bodyweight';
+  if (id.includes('cable') || id.includes('face-pull') || id.includes('pulldown') || id.includes('band') || id.includes('pallof') || id.includes('pushdown') || id.includes('pullthrough')) {
+    return 'bands_cables';
+  }
+  return 'bodyweight';
+}
+
+function isExerciseDoableWithUserEquipment(exOrId) {
+  const eq = (appState && appState.availableEquipment) || DEFAULT_AVAILABLE_EQUIPMENT;
+  const reqKey = getExerciseEquipmentKey(exOrId);
+  if (reqKey === 'bench') {
+    return Boolean(eq.bench && (eq.dumbbell || eq.barbell));
+  }
+  return Boolean(eq[reqKey]);
+}
+
+function getEquipmentAwareQuickAddPool() {
+  const eq = (appState && appState.availableEquipment) || DEFAULT_AVAILABLE_EQUIPMENT;
+  const fullCatalog = [
+    // Lower Body
+    { id: 'goblet-squats', pillar: 'legs', req: 'dumbbell', name: 'Goblet Squats', label: '🦵 Goblet Squats (Dumbbell)' },
+    { id: 'rdls', pillar: 'legs', req: 'dumbbell', name: 'Romanian Deadlifts', label: '🦵 Romanian Deadlifts (Dumbbell)' },
+    { id: 'reverse-lunges', pillar: 'legs', req: 'dumbbell', name: 'Dumbbell Reverse Lunges', label: '🦵 Dumbbell Reverse Lunges' },
+    { id: 'db-sumo-squat', pillar: 'legs', req: 'dumbbell', name: 'Dumbbell Sumo Squat', label: '🦵 Dumbbell Sumo Squat' },
+    { id: 'db-calf-raise', pillar: 'legs', req: 'dumbbell', name: 'Standing Dumbbell Calf Raise', label: '🦵 Standing Dumbbell Calf Raise' },
+    { id: 'bw-squat', pillar: 'legs', req: 'bodyweight', name: 'Bodyweight Air Squat', label: '🦵 Bodyweight Air Squat (No Equip)' },
+    { id: 'bw-walking-lunge', pillar: 'legs', req: 'bodyweight', name: 'Bodyweight Walking Lunges', label: '🦵 Bodyweight Walking Lunges (No Equip)' },
+    { id: 'bw-glute-bridge', pillar: 'legs', req: 'bodyweight', name: 'Floor Glute Bridge', label: '🦵 Floor Glute Bridge (No Equip)' },
+    { id: 'bw-calf-raise', pillar: 'legs', req: 'bodyweight', name: 'Bodyweight Calf Raises', label: '🦵 Bodyweight Calf Raises (No Equip)' },
+    { id: 'bb-back-squat', pillar: 'legs', req: 'barbell', name: 'Barbell Back Squat', label: '🦵 Barbell Back Squat (Barbell)' },
+    { id: 'bb-rdl', pillar: 'legs', req: 'barbell', name: 'Barbell Romanian Deadlift', label: '🦵 Barbell RDL (Barbell)' },
+    { id: 'kb-swing', pillar: 'legs', req: 'kettlebell', name: 'Two-Hand Kettlebell Swing', label: '🦵 Kettlebell Swing (Kettlebell)' },
+    { id: 'kb-goblet-squat', pillar: 'legs', req: 'kettlebell', name: 'Kettlebell Goblet Squat', label: '🦵 Kettlebell Goblet Squat' },
+
+    // Upper Push
+    { id: 'floor-press', pillar: 'push', req: 'dumbbell', name: 'Dumbbell Floor Press', label: '🫸 Dumbbell Floor Press (No Bench)' },
+    { id: 'overhead-press', pillar: 'push', req: 'dumbbell', name: 'Dumbbell Overhead Press', label: '🫸 Dumbbell Overhead Press' },
+    { id: 'db-lateral-raise', pillar: 'push', req: 'dumbbell', name: 'Dumbbell Lateral Raises', label: '🫸 Dumbbell Lateral Raises' },
+    { id: 'db-arnold-press', pillar: 'push', req: 'dumbbell', name: 'Seated / Standing Arnold Press', label: '🫸 Dumbbell Arnold Press' },
+    { id: 'db-tricep-overhead', pillar: 'push', req: 'dumbbell', name: 'Overhead Dumbbell Tricep Extension', label: '🫸 Dumbbell Overhead Tricep Extension' },
+    { id: 'db-bench-press', pillar: 'push', req: 'bench', name: 'Flat Dumbbell Bench Press', label: '🫸 Flat Dumbbell Bench Press (Bench)' },
+    { id: 'bw-pushup', pillar: 'push', req: 'bodyweight', name: 'Classic Floor Push-Ups', label: '🫸 Classic Floor Push-Ups (No Equip)' },
+    { id: 'bw-pike-pushup', pillar: 'push', req: 'bodyweight', name: 'Pike Shoulder Push-Ups', label: '🫸 Pike Shoulder Push-Ups (No Equip)' },
+    { id: 'bw-diamond-pushup', pillar: 'push', req: 'bodyweight', name: 'Diamond Tricep Push-Ups', label: '🫸 Diamond Tricep Push-Ups (No Equip)' },
+    { id: 'bb-overhead-press', pillar: 'push', req: 'barbell', name: 'Standing Barbell Overhead Press', label: '🫸 Barbell Overhead Press (Barbell)' },
+    { id: 'kb-clean-press', pillar: 'push', req: 'kettlebell', name: 'Kettlebell Clean & Press', label: '🫸 Kettlebell Clean & Press' },
+
+    // Upper Pull
+    { id: 'bent-over-rows', pillar: 'pull', req: 'dumbbell', name: 'Dumbbell Bent-Over Rows', label: '🫷 Dumbbell Bent-Over Rows' },
+    { id: 'db-single-arm-row', pillar: 'pull', req: 'dumbbell', name: 'Single-Arm Staggered Dumbbell Row', label: '🫷 Single-Arm Dumbbell Row (No Bench)' },
+    { id: 'db-bicep-curl', pillar: 'pull', req: 'dumbbell', name: 'Dumbbell Supinating Bicep Curls', label: '🫷 Dumbbell Supinating Bicep Curls' },
+    { id: 'db-hammer-curl', pillar: 'pull', req: 'dumbbell', name: 'Dumbbell Neutral-Grip Hammer Curls', label: '🫷 Dumbbell Hammer Curls' },
+    { id: 'db-rear-delt-fly', pillar: 'pull', req: 'dumbbell', name: 'Bent-Over Dumbbell Rear Delt Fly', label: '🫷 Dumbbell Rear Delt Fly' },
+    { id: 'db-shrug', pillar: 'pull', req: 'dumbbell', name: 'Standing Dumbbell Shrugs', label: '🫷 Standing Dumbbell Shrugs' },
+    { id: 'bw-superman', pillar: 'pull', req: 'bodyweight', name: 'Prone Floor Back & Rear-Delt Raise', label: '🫷 Prone Floor Back & Rear-Delt Raise (No Equip)' },
+    { id: 'bw-inverted-row', pillar: 'pull', req: 'bodyweight', name: 'Bodyweight Inverted Row (Sturdy Table)', label: '🫷 Bodyweight Inverted Row (No Equip)' },
+    { id: 'bw-pullup', pillar: 'pull', req: 'pullup_bar', name: 'Overhand Pull-Ups', label: '🫷 Overhand Pull-Ups (Pull-Up Bar)' },
+    { id: 'bw-chinup', pillar: 'pull', req: 'pullup_bar', name: 'Underhand Chin-Ups', label: '🫷 Underhand Chin-Ups (Pull-Up Bar)' },
+    { id: 'other-face-pull', pillar: 'pull', req: 'bands_cables', name: 'Band / Cable Face Pulls', label: '🫷 Band / Cable Face Pulls (Band/Cable)' },
+    { id: 'other-band-pullapart', pillar: 'pull', req: 'bands_cables', name: 'Resistance Band Pull-Aparts', label: '🫷 Resistance Band Pull-Aparts (Band)' },
+    { id: 'bb-bent-row', pillar: 'pull', req: 'barbell', name: 'Barbell Bent-Over Row', label: '🫷 Barbell Bent-Over Row (Barbell)' },
+    { id: 'kb-gorilla-row', pillar: 'pull', req: 'kettlebell', name: 'Alternating Kettlebell Gorilla Rows', label: '🫷 Kettlebell Gorilla Rows' },
+
+    // Core & Decompression
+    { id: 'core-decompression', pillar: 'core', req: 'bodyweight', name: 'Core & Supine 90/90 Decompression', label: '🧘 Core & Supine 90/90 Decompression (Floor)' },
+    { id: 'core-spinal-hang', pillar: 'core', req: 'bodyweight', name: "Child's Pose & Lat Traction (No Bar)", label: "🧘 Child's Pose & Lat Traction (Floor · No Bar)" },
+    { id: 'bw-plank', pillar: 'core', req: 'bodyweight', name: 'Forearm RKC Plank', label: '🧘 Forearm RKC Plank (Floor)' },
+    { id: 'bw-dead-bug', pillar: 'core', req: 'bodyweight', name: 'Contralateral Dead Bug', label: '🧘 Contralateral Dead Bug (Floor)' },
+    { id: 'bw-bird-dog', pillar: 'core', req: 'bodyweight', name: 'Quadruped Bird-Dog', label: '🧘 Quadruped Bird-Dog (Floor)' }
+  ];
+
+  const filtered = fullCatalog.filter((item) => {
+    if (item.req === 'bench') return Boolean(eq.bench && (eq.dumbbell || eq.barbell));
+    return Boolean(eq[item.req]);
+  });
+
+  // Always guarantee at least floor/bodyweight options if user unchecked everything
+  return filtered.length > 0 ? filtered : fullCatalog.filter((item) => item.req === 'bodyweight');
+}
+
+function getBestPillarRecommendation(pillarKey, dayKey) {
+  const pool = getEquipmentAwareQuickAddPool().filter((x) => x.pillar === pillarKey);
+  if (pool.length === 0) {
+    return { recId: 'bw-squat', recName: 'Bodyweight Exercise' };
+  }
+  const currentIds = new Set([
+    ...((appState.customRoutine && appState.customRoutine.dayA) || []),
+    ...((appState.customRoutine && appState.customRoutine.dayB) || [])
+  ]);
+  const unused = pool.find((x) => !currentIds.has(x.id));
+  const chosen = unused || (dayKey === 'dayB' && pool[1] ? pool[1] : pool[0]);
+  return { recId: chosen.id, recName: chosen.name };
+}
+
+/**
+ * Evaluates a Day's routine specifically for a MODERATE, SUSTAINABLE Full-Body Plan
+ * AND verifies that every exercise matches the user's available equipment.
+ */
+function evaluateModeratePlan(dayKey) {
+  const exercises = getDayExercises(dayKey);
+  const count = exercises.length;
+  const totalSets = count * 3;
+  const estMinutes = Math.round(count * 9.5);
+
+  const recLegs = getBestPillarRecommendation('legs', dayKey);
+  const recPush = getBestPillarRecommendation('push', dayKey);
+  const recPull = getBestPillarRecommendation('pull', dayKey);
+  const recCore = getBestPillarRecommendation('core', dayKey);
+
+  const pillars = {
+    legs: { label: '🦵 Lower Body', count: 0, recId: recLegs.recId, recName: recLegs.recName },
+    push: { label: '🫸 Upper Push', count: 0, recId: recPush.recId, recName: recPush.recName },
+    pull: { label: '🫷 Upper Pull', count: 0, recId: recPull.recId, recName: recPull.recName },
+    core: { label: '🧘 Core / Decompress', count: 0, recId: recCore.recId, recName: recCore.recName }
+  };
+
+  let totalSpinalLoad = 0;
+  const equipmentMismatches = [];
+
+  const classified = exercises.map((ex, index) => {
+    const info = classifyExercisePillar(ex);
+    if (pillars[info.key]) pillars[info.key].count += 1;
+    totalSpinalLoad += info.spinalLoad;
+
+    const reqEquip = getExerciseEquipmentKey(ex);
+    const doable = isExerciseDoableWithUserEquipment(ex);
+    if (!doable) {
+      const replacement = getBestPillarRecommendation(info.key, dayKey);
+      equipmentMismatches.push({
+        index,
+        exId: ex.id,
+        exName: ex.name,
+        reqKey: reqEquip,
+        reqLabel: EQUIPMENT_LABELS[reqEquip] || reqEquip,
+        replacementId: replacement.recId,
+        replacementName: replacement.recName
+      });
+    }
+
+    return { ex, index, reqEquip, doable, ...info };
+  });
+
+  // Check if sequence is optimal (rank should be non-decreasing: Legs(1) -> Push/Pull(2) -> Isolation(3) -> Core/Decompress(4))
+  let isSequenceOptimal = true;
+  let sequenceIssueText = '';
+  for (let i = 0; i < classified.length - 1; i++) {
+    if (classified[i].sequenceRank > classified[i + 1].sequenceRank) {
+      isSequenceOptimal = false;
+      if (classified[i].key === 'core') {
+        sequenceIssueText = `Move "${classified[i].ex.name}" to the end (#${count}) so you don't pre-fatigue your core stabilizer muscles before "${classified[i + 1].ex.name}".`;
+      } else if (classified[i + 1].key === 'legs' && classified[i].key !== 'legs') {
+        sequenceIssueText = `Put "${classified[i + 1].ex.name}" earlier (#1) while your legs and lower-back bracing are freshest.`;
+      } else {
+        sequenceIssueText = `Put heavy compound lifts before smaller isolation/core exercises for better energy and joint safety.`;
+      }
+      break;
+    }
+  }
+
+  const missingPillars = Object.entries(pillars)
+    .filter(([, p]) => p.count === 0)
+    .map(([k, p]) => ({ key: k, ...p }));
+
+  const overloadedPillars = Object.entries(pillars)
+    .filter(([, p]) => p.count >= 3)
+    .map(([, p]) => p.label);
+
+  const tips = [];
+  let statusLevel = 'sweet-spot'; // 'sweet-spot' | 'caution' | 'hardcore-warning'
+  let badgeText = '✅ SWEET SPOT · MODERATE & SUSTAINABLE';
+  let summaryText = `Ideal moderate load (${count} exercises · ${totalSets} sets · ~${estMinutes} mins). Every exercise matches your selected equipment!`;
+
+  if (equipmentMismatches.length > 0) {
+    statusLevel = 'caution';
+    badgeText = '🛠️ EQUIPMENT MISMATCH DETECTED';
+    equipmentMismatches.forEach((m) => {
+      tips.push(
+        `Equipment Alert: "${m.exName}" requires ${m.reqLabel} (which you unchecked above). Click "🔄 Swap to Available Equipment" to replace it with "${m.replacementName}".`
+      );
+    });
+  }
+
+  if (count > 5 || totalSets > 15 || totalSpinalLoad > 3.6) {
+    statusLevel = 'hardcore-warning';
+    badgeText = '⚠️ OVER MODERATE LIMIT · GETTING HARDCORE';
+    summaryText = `This day has ${count} exercises (${totalSets} sets, ~${estMinutes} mins). For a moderate full-body plan, 4–5 exercises (12–15 sets) is the upper limit before recovery & form quality drop.`;
+    tips.push(
+      `Trim ${count - 5 > 0 ? count - 5 : 1} exercise(s) or move one to ${dayKey === 'dayA' ? 'Day B' : 'Day A'} to stay in the 12–15 set Moderate Sweet Spot.`
+    );
+  } else if (count < 3) {
+    statusLevel = 'caution';
+    badgeText = '💡 LIGHT / EXPRESS SESSION';
+    summaryText = `Currently ${count} exercise(s) (${totalSets} sets, ~${estMinutes} mins). Great for a quick recovery day, or add ${4 - count} more for a complete 4-pillar moderate workout.`;
+  }
+
+  if (overloadedPillars.length > 0) {
+    if (statusLevel === 'sweet-spot') statusLevel = 'caution';
+    tips.push(
+      `High overlap on ${overloadedPillars.join(', ')} (3+ exercises). On a moderate full-body plan, 1–2 exercises per movement pattern prevents local joint overuse.`
+    );
+  }
+
+  if (missingPillars.length > 0) {
+    if (statusLevel === 'sweet-spot') {
+      statusLevel = 'caution';
+      badgeText = '💡 MODERATE LOAD · MISSING MOVEMENT PILLAR';
+    }
+    tips.push(
+      `Missing ${missingPillars.map((m) => m.label).join(' & ')} on ${dayKey === 'dayA' ? 'Day A' : 'Day B'}. Click a "+ Add" pill below (filtered to your equipment) to balance all 4 full-body pillars.`
+    );
+  }
+
+  if (!isSequenceOptimal && sequenceIssueText) {
+    if (statusLevel === 'sweet-spot') {
+      statusLevel = 'caution';
+      badgeText = '💡 GOOD MODERATE VOLUME · ORDER TIP';
+    }
+    tips.push(`Order Suggestion: ${sequenceIssueText}`);
+  }
+
+  if (tips.length === 0) {
+    tips.push(
+      'Sequence & Equipment Check Passed: Compound Lower Body first → Upper Push & Pull in the middle → Core & Spinal Decompression last, using only your available equipment.'
+    );
+  }
+
+  // Load meter percentage (4 exercises / 12 sets = 72% right inside the 60%–85% Moderate Sweet Spot)
+  const loadPct = Math.min(100, Math.round((count / 6) * 85 + (totalSpinalLoad / 4.2) * 15));
+
+  return {
+    dayKey,
+    count,
+    totalSets,
+    estMinutes,
+    loadPct,
+    statusLevel,
+    badgeText,
+    summaryText,
+    pillars,
+    missingPillars,
+    equipmentMismatches,
+    isSequenceOptimal,
+    tips,
+    classified
+  };
+}
+
+function renderModerateCoachWidget() {
+  if (!moderateCoachWidget) return;
+  const dayKey = appState.activeDay;
+  const evalA = evaluateModeratePlan('dayA');
+  const evalB = evaluateModeratePlan('dayB');
+  const cur = dayKey === 'dayA' ? evalA : evalB;
+
+  if (togglePlanAssistantBtn) {
+    togglePlanAssistantBtn.classList.toggle('active', Boolean(appState.planAssistantOpen));
+  }
+
+  const eq = (appState && appState.availableEquipment) || DEFAULT_AVAILABLE_EQUIPMENT;
+  const equipPillsHtml = Object.entries(EQUIPMENT_LABELS)
+    .map(([eqKey, eqLabel]) => {
+      const isChecked = Boolean(eq[eqKey]);
+      return `
+        <button
+          type="button"
+          class="lib-filter-pill equip-selector-pill ${isChecked ? 'active' : ''}"
+          data-action="toggle-user-equipment"
+          data-equip-key="${eqKey}"
+          aria-pressed="${isChecked}"
+          title="Toggle whether you have ${eqLabel}"
+        >
+          <span>${isChecked ? '✓' : '+'}</span>
+          <span>${eqLabel}</span>
+        </button>
+      `;
+    })
+    .join('');
+
+  const pillarChipsHtml = Object.entries(cur.pillars)
+    .map(([, p]) => {
+      const covered = p.count > 0;
+      const overloaded = p.count >= 3;
+      return `
+        <div class="coach-pillar-chip ${covered ? (overloaded ? 'pillar-over' : 'pillar-ok') : 'pillar-missing'}">
+          <span>${p.label}</span>
+          <strong>${covered ? `${p.count}× ✓` : 'Missing'}</strong>
+          ${
+            !covered
+              ? `<button type="button" class="coach-quick-add-btn" data-action="coach-add-exercise" data-day="${dayKey}" data-ex-id="${p.recId}" title="Add ${p.recName} (Matches your equipment)">+ Add ${p.recName}</button>`
+              : ''
+          }
+        </div>
+      `;
+    })
+    .join('');
+
+  const tipsHtml = cur.tips.map((t) => `<li>${escapeHtml(t)}</li>`).join('');
+
+  // Quick-add options strictly filtered to the user's selected equipment!
+  const quickAddPool = getEquipmentAwareQuickAddPool();
+
+  const buildDayBuilderColumn = (dKey, dLabel, dEval) => {
+    const otherDay = dKey === 'dayA' ? 'dayB' : 'dayA';
+    const otherLabel = dKey === 'dayA' ? 'Day B' : 'Day A';
+    const rows = dEval.classified
+      .map(
+        (item, idx) => `
+        <div class="builder-ex-row ${!item.doable ? 'builder-row-mismatch' : ''}">
+          <div class="builder-ex-left">
+            <span class="builder-order-tag">${dKey === 'dayA' ? 'A' : 'B'}${idx + 1}</span>
+            <div>
+              <div class="builder-ex-name">
+                ${escapeHtml(item.ex.name)}
+                ${!item.doable ? `<span class="equip-mismatch-tag" title="Requires ${EQUIPMENT_LABELS[item.reqEquip] || item.reqEquip}">⚠️ No ${EQUIPMENT_LABELS[item.reqEquip] || item.reqEquip}</span>` : ''}
+              </div>
+              <div class="builder-ex-meta">${item.label} · ${escapeHtml(item.ex.scheme)}</div>
+            </div>
+          </div>
+          <div class="builder-ex-actions">
+            <button type="button" class="builder-icon-btn" data-action="move-ex-up" data-day="${dKey}" data-index="${idx}" ${idx === 0 ? 'disabled' : ''} title="Move Up earlier in workout">↑</button>
+            <button type="button" class="builder-icon-btn" data-action="move-ex-down" data-day="${dKey}" data-index="${idx}" ${idx === dEval.classified.length - 1 ? 'disabled' : ''} title="Move Down later in workout">↓</button>
+            <button type="button" class="builder-icon-btn" data-action="transfer-ex-day" data-from-day="${dKey}" data-index="${idx}" title="Move to ${otherLabel}">⇄ ${otherLabel}</button>
+            <button type="button" class="builder-icon-btn danger" data-action="remove-ex-day" data-day="${dKey}" data-index="${idx}" ${dEval.classified.length <= 1 ? 'disabled' : ''} title="Remove from ${dLabel}">✕</button>
+          </div>
+        </div>
+      `
+      )
+      .join('');
+
+    const optionsHtml = quickAddPool
+      .map((opt) => `<option value="${opt.id}">${opt.label}</option>`)
+      .join('');
+
+    return `
+      <div class="builder-day-col ${appState.activeDay === dKey ? 'active-builder-col' : ''}">
+        <div class="builder-col-header">
+          <div>
+            <span class="builder-day-title">${dLabel}</span>
+            <span class="builder-day-sub">${dEval.count} exercises · ${dEval.totalSets} sets (~${dEval.estMinutes}m)</span>
+          </div>
+          <span class="builder-status-dot status-${dEval.statusLevel}">${
+            dEval.statusLevel === 'sweet-spot'
+              ? 'Moderate ✓'
+              : dEval.statusLevel === 'hardcore-warning'
+              ? 'Too Heavy ⚠️'
+              : 'Tip 💡'
+          }</span>
+        </div>
+        <div class="builder-ex-list">${rows}</div>
+        <div class="builder-add-bar">
+          <select id="quickAddSelect-${dKey}" class="builder-select" aria-label="Add doable exercise to ${dLabel}">
+            ${optionsHtml}
+          </select>
+          <button type="button" class="btn-ghost btn-xs" data-action="builder-select-add" data-day="${dKey}">+ Add to ${dLabel}</button>
+        </div>
+      </div>
+    `;
+  };
+
+  moderateCoachWidget.innerHTML = `
+    <!-- Dedicated Page Hero Header -->
+    <section class="analysis-hero-card">
+      <div class="analysis-hero-top">
+        <div>
+          <span class="exercise-order-badge">MODERATE FULL-BODY PLANNER &amp; AI COACH</span>
+          <h2 class="library-main-heading">Day A &amp; Day B — Plan Rearranger &amp; Moderate Coach</h2>
+          <p class="library-main-desc">
+            First select the equipment you own below so the Coach only recommends exercises you can do. Then customize your <strong>Day A</strong> and <strong>Day B</strong> routines while staying inside the <strong>Moderate Sweet Spot (3–5 exercises · 9–15 sets · ~35–45 mins)</strong>.
+          </p>
+        </div>
+        <div class="analysis-hero-actions">
+          <button type="button" class="btn-secondary btn-sm" data-action="back-to-tracker">
+            ← Back to 2-Day Workout Tracker
+          </button>
+          <button type="button" class="btn-accent btn-sm" data-action="coach-auto-order-both">
+            ✨ Auto-Order Day A &amp; B
+          </button>
+          <button type="button" class="btn-danger-outline btn-sm" data-action="coach-reset-default-plan">
+            ↺ Restore Default Plan
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 1: Ask First What Equipment the User Has -->
+      <div class="coach-equipment-bar" role="region" aria-label="Select Your Available Workout Equipment">
+        <div class="coach-equip-prompt">
+          <span class="coach-equip-badge">🤖 STEP 1 · YOUR EQUIPMENT</span>
+          <span class="coach-equip-question">What equipment do you have available? (Click to toggle — suggestions &amp; quick-add only show exercises you can do):</span>
+        </div>
+        <div class="coach-equip-pills">
+          ${equipPillsHtml}
+        </div>
+      </div>
+    </section>
+
+    <!-- Step 2: Moderate Coach Evaluation for Active Day (with Day A / Day B Switcher) -->
+    <section class="analysis-panel-card">
+      <div class="analysis-panel-header">
+        <div>
+          <span class="exercise-order-badge">STEP 2 · MODERATE LOAD &amp; 4-PILLAR CHECK</span>
+          <h3 class="analysis-panel-title">🩺 Moderate Workout Evaluation (${dayKey === 'dayA' ? '🟦 Day A Routine' : '🟪 Day B Routine'})</h3>
+        </div>
+        <div class="library-filter-pills" role="group" aria-label="Switch Coach Evaluation Day">
+          <button type="button" class="lib-filter-pill ${dayKey === 'dayA' ? 'active' : ''}" data-action="coach-switch-day" data-day="dayA">
+            🟦 Inspect Day A (${evalA.count} Ex · ${evalA.totalSets} Sets)
+          </button>
+          <button type="button" class="lib-filter-pill ${dayKey === 'dayB' ? 'active' : ''}" data-action="coach-switch-day" data-day="dayB">
+            🟪 Inspect Day B (${evalB.count} Ex · ${evalB.totalSets} Sets)
+          </button>
+        </div>
+      </div>
+
+      <div class="coach-summary-bar status-${cur.statusLevel}">
+        <div class="coach-summary-left">
+          <div class="coach-badge-row">
+            <span class="coach-verdict-badge status-${cur.statusLevel}">${cur.badgeText}</span>
+            <span class="coach-time-pill">⏱ ~${cur.estMinutes} min · ${cur.totalSets} total sets (Moderate Cap: 15 sets)</span>
+          </div>
+          <p class="coach-summary-text">${escapeHtml(cur.summaryText)}</p>
+          <ul class="coach-tips-list">${tipsHtml}</ul>
+        </div>
+
+        <div class="coach-summary-right">
+          <div class="coach-meter-box">
+            <div class="coach-meter-labels">
+              <span>Light</span>
+              <span class="sweet-spot-label">🎯 Moderate Sweet Spot (3–5 Ex)</span>
+              <span>Hardcore ⚠️</span>
+            </div>
+            <div class="coach-meter-track">
+              <div class="coach-sweet-zone" title="Ideal Moderate Zone: 3 to 5 exercises (9–15 sets)"></div>
+              <div class="coach-meter-fill status-${cur.statusLevel}" style="width: ${cur.loadPct}%"></div>
+            </div>
+          </div>
+
+          <div class="coach-action-btns">
+            ${
+              cur.equipmentMismatches.length > 0
+                ? `<button type="button" class="btn-accent btn-xs" data-action="coach-swap-equipment" data-day="${dayKey}" title="Automatically swap exercises that need missing equipment with alternatives you can do">🔄 Swap to Available Equipment (${cur.equipmentMismatches.length})</button>`
+                : ''
+            }
+            ${
+              !cur.isSequenceOptimal
+                ? `<button type="button" class="btn-accent btn-xs" data-action="coach-auto-order" data-day="${dayKey}" title="Put Compound Legs first, Upper Push/Pull second, and Core/Decompression last">✨ Auto-Order ${dayKey === 'dayA' ? 'Day A' : 'Day B'}</button>`
+                : ''
+            }
+            ${
+              cur.count > 5
+                ? `<button type="button" class="btn-accent btn-xs" data-action="coach-trim-moderate" data-day="${dayKey}" title="Trim excess exercises to stay within the 5-exercise moderate limit">⚖️ Trim to Moderate Cap (5)</button>`
+                : ''
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="coach-pillars-bar" style="margin-top: 0.9rem;" aria-label="4 Moderate Full-Body Pillars Check">
+        ${pillarChipsHtml}
+      </div>
+    </section>
+
+    <!-- Step 3: Always-Visible Side-by-Side Day A & Day B Plan Rearranger Board -->
+    <section class="analysis-panel-card">
+      <div class="analysis-panel-header">
+        <div>
+          <span class="exercise-order-badge">STEP 3 · SIDE-BY-SIDE ROUTINE REARRANGER</span>
+          <h3 class="analysis-panel-title">🧭 Rearrange Day A &amp; Day B Exercises (Filtered to Your Equipment)</h3>
+          <p class="coach-builder-desc">
+            Use <strong>↑ / ↓</strong> to change exercise order, <strong>⇄ Day A / B</strong> to move an exercise to the other day, or pick from the dropdown below (which only lists exercises matching your equipment from Step 1).
+          </p>
+        </div>
+      </div>
+      <div class="builder-two-col">
+        ${buildDayBuilderColumn('dayA', '🟦 Day A Routine', evalA)}
+        ${buildDayBuilderColumn('dayB', '🟪 Day B Routine', evalB)}
+      </div>
+    </section>
+  `;
+}
+
 function calculateDayStats(dayKey) {
-  const dayData = WORKOUT_PROGRAM[dayKey];
+  const exercises = getDayExercises(dayKey);
   let completedSets = 0;
   let totalSets = 0;
   let totalVolume = 0;
 
-  dayData.exercises.forEach((ex) => {
-    const exState = appState.exercises[ex.id];
+  exercises.forEach((ex) => {
+    const exState = ensureExerciseState(ex);
     exState.sets.forEach((s) => {
       totalSets += 1;
       if (s.completed) {
@@ -541,6 +1830,7 @@ function updateHeaderAndStats() {
 
   autoStartTimerCheckbox.checked = appState.autoStartTimer;
   updateSoundToggleUI();
+  renderModerateCoachWidget();
 }
 
 function renderExerciseCards() {
@@ -549,15 +1839,16 @@ function renderExerciseCards() {
   }
 
   const dayKey = appState.activeDay;
-  const dayData = WORKOUT_PROGRAM[dayKey];
+  const exercises = getDayExercises(dayKey);
+  const otherDayLabel = dayKey === 'dayA' ? 'Day B' : 'Day A';
 
-  workoutContainer.innerHTML = dayData.exercises
-    .map((rawEx) => {
-      const ex = getResolvedExerciseData(rawEx);
-      const exState = appState.exercises[ex.id];
+  workoutContainer.innerHTML = exercises
+    .map((ex, idx) => {
+      const exState = ensureExerciseState(ex);
       const allSetsDone = exState.sets.every((s) => s.completed);
       const repUnitLabel = ex.unitOverride || 'reps';
       const canvasId = `canvas3d-${ex.id}`;
+      const pillarInfo = classifyExercisePillar(ex);
 
       const variantsHtml =
         ex.variants && ex.variants.length
@@ -676,7 +1967,7 @@ function renderExerciseCards() {
         <article class="exercise-card ${allSetsDone ? 'card-completed' : ''}" data-day="${dayKey}" data-card-exercise="${ex.id}">
           <div class="card-top-bar">
             <div>
-              <span class="exercise-order-badge">${ex.order} · ${allSetsDone ? 'COMPLETED' : '3D MUSCLE MAP'}</span>
+              <span class="exercise-order-badge">${ex.order} · ${pillarInfo.label} · ${allSetsDone ? 'COMPLETED' : '3D MUSCLE MAP'}</span>
               <h3 class="exercise-title">${ex.name}</h3>
             </div>
             <div class="exercise-prescription">
@@ -762,14 +2053,14 @@ function renderExerciseCards() {
     .join('');
 
   if (window.PulseLift3D) {
-    dayData.exercises.forEach((rawEx) => {
-      const ex = getResolvedExerciseData(rawEx);
+    exercises.forEach((ex) => {
       const canvasId = `canvas3d-${ex.id}`;
       const cardEl = workoutContainer.querySelector(`[data-card-exercise="${ex.id}"]`);
       const spinBtn = cardEl ? cardEl.querySelector('[data-action="card-spin"]') : null;
 
       window.PulseLift3D.createViewer(canvasId, ex.id, {
         poseId: ex.poseId || ex.id,
+        activeMuscles: typeof buildExerciseActiveMusclesMap === 'function' ? buildExerciseActiveMusclesMap(ex) : null,
         initialYaw: ex.defaultYaw !== undefined ? ex.defaultYaw : 42,
         initialPitch: 16,
         autoSpin: true,
@@ -784,33 +2075,126 @@ function renderExerciseCards() {
   }
 }
 
+const WEEKDAY_NAMES_MON_FIRST = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const WEEKDAY_NAMES_FULL = WEEKDAY_NAMES_MON_FIRST;
+const WEEKDAY_SHORT_MON_FIRST = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function toLocalIsoDate(dateObj) {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const d = String(dateObj.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function getMonFirstWeekdayIdx(dateObj) {
+  // JS getDay(): 0=Sun, 1=Mon...6=Sat -> convert to 0=Mon...6=Sun
+  return (dateObj.getDay() + 6) % 7;
+}
+
+function normalizeHistoryEntry(entry) {
+  const dt = entry.isoDate
+    ? new Date(`${entry.isoDate}T12:00:00`)
+    : new Date(typeof entry.id === 'number' ? entry.id : Date.now());
+  const validDt = Number.isNaN(dt.getTime()) ? new Date() : dt;
+  const isoDate = entry.isoDate || toLocalIsoDate(validDt);
+  const weekdayIdx =
+    typeof entry.weekdayIdx === 'number' ? entry.weekdayIdx : getMonFirstWeekdayIdx(validDt);
+  const weekdayShort = WEEKDAY_SHORT_MON_FIRST[weekdayIdx] || 'Mon';
+  const weekdayFull = WEEKDAY_NAMES_MON_FIRST[weekdayIdx] || 'Monday';
+  const dayKey =
+    entry.dayKey === 'dayB' || (entry.dayTitle && entry.dayTitle.includes('Day B'))
+      ? 'dayB'
+      : 'dayA';
+  const planCode = dayKey === 'dayB' ? 'B' : 'A';
+  const totalSets =
+    entry.totalSets ||
+    (Array.isArray(entry.exercises) ? entry.exercises.length * 3 : 12);
+
+  return {
+    ...entry,
+    isoDate,
+    weekdayIdx,
+    weekdayShort,
+    weekdayFull,
+    dayKey,
+    planCode,
+    totalSets,
+    completedSets: entry.completedSets ?? totalSets,
+    totalVolume: entry.totalVolume ?? 0
+  };
+}
+
+let historyFilterPlan = 'all'; // 'all' | 'dayA' | 'dayB'
+
 function renderHistoryPanel() {
-  historyCountBadge.textContent = String(workoutHistory.length);
+  const countStr = String(workoutHistory.length);
+  if (historyCountBadge) historyCountBadge.textContent = countStr;
+  const navHistBadge = document.getElementById('navHistoryCountBadge');
+  if (navHistBadge) navHistBadge.textContent = countStr;
+
+  renderHistoryAnalysisPage();
+
+  const latestSnap = backupSnapshots[0] || null;
+  const canRestoreSnap =
+    latestSnap &&
+    Array.isArray(latestSnap.workoutHistory) &&
+    latestSnap.workoutHistory.length > workoutHistory.length;
+
+  const drawerVaultBar = `
+    <div class="drawer-backup-bar">
+      <div class="drawer-backup-status">
+        <span class="vault-pill vault-ok">🛡️ Auto-Backup ON</span>
+        <span class="drawer-backup-meta">${
+          backupVaultStatus.diskSynced ? 'Disk + IndexedDB + Local' : 'IndexedDB + Local Vault'
+        }${backupVaultStatus.lastSavedAt ? ` · Saved ${backupVaultStatus.lastSavedAt}` : ''}</span>
+      </div>
+      <div class="drawer-backup-actions">
+        ${
+          canRestoreSnap
+            ? `<button type="button" class="btn-accent btn-xs" data-drawer-backup="restore-latest" data-snapshot-id="${latestSnap.snapshotId}">↺ Restore ${latestSnap.workoutHistory.length} Sessions (${escapeHtml(latestSnap.reason)})</button>`
+            : ''
+        }
+        <button type="button" class="btn-secondary btn-xs" data-drawer-backup="sync-recover" title="Auto-recover and merge from Disk & IndexedDB Vault">🔄 Sync / Recover</button>
+        <button type="button" class="btn-secondary btn-xs" data-drawer-backup="export-json" title="Download backup JSON file">📥 Export .json</button>
+      </div>
+    </div>
+  `;
+
   if (workoutHistory.length === 0) {
     historyList.innerHTML = `
+      ${drawerVaultBar}
       <div class="history-empty">
-        No logged workouts yet. Complete your sets and click <strong>Save Workout Log</strong> to record your weights &amp; reps history!
+        No logged workouts in current view. Complete your sets and click <strong>Save Workout Log</strong>, click <strong>🔄 Sync / Recover</strong> above, or open the <button type="button" class="btn-accent btn-xs" data-open-history-analysis="true">📊 History &amp; Plan A/B Analysis Page</button> to manage backups &amp; schedule!
       </div>
     `;
     return;
   }
 
-  historyList.innerHTML = workoutHistory
+  const normalized = workoutHistory.map(normalizeHistoryEntry);
+  const countA = normalized.filter((e) => e.planCode === 'A').length;
+  const countB = normalized.filter((e) => e.planCode === 'B').length;
+
+  const itemsHtml = normalized
+    .slice(0, 8)
     .map((entry) => {
-      const exSummary = entry.exercises
+      const exSummary = (entry.exercises || [])
         .map((e) => {
-          const setsStr = e.sets
+          const setsStr = (e.sets || [])
             .map((s) => `${s.weight}kg×${s.reps}${s.completed ? '✓' : ''}`)
             .join(', ');
-          return `<span class="history-ex-pill"><strong>${e.name}:</strong> ${setsStr}</span>`;
+          return `<span class="history-ex-pill"><strong>${escapeHtml(e.name)}:</strong> ${escapeHtml(setsStr)}</span>`;
         })
         .join('');
 
       return `
         <div class="history-item">
           <div class="history-item-top">
-            <span class="history-item-title">${entry.dayTitle}</span>
-            <span class="history-item-meta">${entry.timestamp} · ${entry.completedSets}/12 sets · ${entry.totalVolume} kg vol</span>
+            <div class="history-item-title-group">
+              <span class="plan-code-pill plan-${entry.planCode.toLowerCase()}">PLAN ${entry.planCode}</span>
+              <span class="history-weekday-tag">${entry.weekdayFull} (${entry.isoDate})</span>
+              <span class="history-item-title">${escapeHtml(entry.dayTitle)}</span>
+            </div>
+            <span class="history-item-meta">${entry.completedSets}/${entry.totalSets} sets · ${entry.totalVolume.toLocaleString()} kg vol</span>
           </div>
           <div class="history-exercises-summary">
             ${exSummary}
@@ -819,6 +2203,467 @@ function renderHistoryPanel() {
       `;
     })
     .join('');
+
+  historyList.innerHTML = `
+    ${drawerVaultBar}
+    <div class="drawer-analysis-banner">
+      <div>
+        <strong>📊 Plan Split:</strong> <span class="plan-code-pill plan-a">Plan A: ${countA}×</span> <span class="plan-code-pill plan-b">Plan B: ${countB}×</span>
+      </div>
+      <div class="drawer-banner-btns">
+        <button type="button" class="btn-ghost btn-xs forgot-data-trigger-btn" data-open-backfill-modal="true">
+          📅 Forgot to key in data?
+        </button>
+        <button type="button" class="btn-accent btn-xs" data-open-history-analysis="true">
+          📊 Open Full Plan A/B Schedule &amp; Backup Vault →
+        </button>
+      </div>
+    </div>
+    ${itemsHtml}
+  `;
+}
+
+function renderHistoryAnalysisPage() {
+  const container = document.getElementById('historyAnalysisPageContainer');
+  if (!container) return;
+
+  const normalized = workoutHistory
+    .map(normalizeHistoryEntry)
+    .sort((a, b) => b.isoDate.localeCompare(a.isoDate) || (b.id || 0) - (a.id || 0));
+
+  const totalSessions = normalized.length;
+  const countA = normalized.filter((e) => e.planCode === 'A').length;
+  const countB = normalized.filter((e) => e.planCode === 'B').length;
+  const pctA = totalSessions > 0 ? Math.round((countA / totalSessions) * 100) : 50;
+  const pctB = totalSessions > 0 ? 100 - pctA : 50;
+
+  const totalVolA = Math.round(
+    normalized.filter((e) => e.planCode === 'A').reduce((acc, e) => acc + (Number(e.totalVolume) || 0), 0)
+  );
+  const totalVolB = Math.round(
+    normalized.filter((e) => e.planCode === 'B').reduce((acc, e) => acc + (Number(e.totalVolume) || 0), 0)
+  );
+  const totalSetsAll = normalized.reduce((acc, e) => acc + (Number(e.completedSets) || 0), 0);
+
+  // Determine Next Recommended Plan based on most recent session
+  const latestEntry = normalized[0] || null;
+  const nextPlanCode = latestEntry ? (latestEntry.planCode === 'A' ? 'B' : 'A') : 'A';
+  const nextDayKey = nextPlanCode === 'B' ? 'dayB' : 'dayA';
+  const nextPlanDesc =
+    nextPlanCode === 'A'
+      ? 'Plan A (Squat · Floor Press · Row · Decompress)'
+      : 'Plan B (RDL · Overhead Press · Lunge · Traction)';
+
+  // Build Day-of-Week Breakdown (Monday=0 .. Sunday=6)
+  const weekdayCounts = WEEKDAY_NAMES_MON_FIRST.map((name, idx) => ({
+    idx,
+    name,
+    short: WEEKDAY_SHORT_MON_FIRST[idx],
+    planA: 0,
+    planB: 0,
+    total: 0
+  }));
+  normalized.forEach((e) => {
+    const bucket = weekdayCounts[e.weekdayIdx];
+    if (bucket) {
+      if (e.planCode === 'A') bucket.planA += 1;
+      else bucket.planB += 1;
+      bucket.total += 1;
+    }
+  });
+  const maxWeekdayTotal = Math.max(1, ...weekdayCounts.map((w) => w.total));
+
+  const topDaysA = weekdayCounts
+    .filter((w) => w.planA > 0)
+    .sort((a, b) => b.planA - a.planA)
+    .slice(0, 2)
+    .map((w) => w.short);
+  const topDaysB = weekdayCounts
+    .filter((w) => w.planB > 0)
+    .sort((a, b) => b.planB - a.planB)
+    .slice(0, 2)
+    .map((w) => w.short);
+
+  // Build 28-Day Schedule Calendar (4 weeks ending this week, Mon -> Sun)
+  const today = new Date();
+  const todayIso = toLocalIsoDate(today);
+  const todayMonIdx = getMonFirstWeekdayIdx(today);
+  // Start of current week (Monday)
+  const currentWeekMonday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - todayMonIdx);
+  // Start 3 weeks before current week Monday (28 days total = 4 full Mon-Sun weeks)
+  const startCalDate = new Date(
+    currentWeekMonday.getFullYear(),
+    currentWeekMonday.getMonth(),
+    currentWeekMonday.getDate() - 21
+  );
+
+  const byDateMap = new Map();
+  normalized.forEach((e) => {
+    if (!byDateMap.has(e.isoDate)) byDateMap.set(e.isoDate, []);
+    byDateMap.get(e.isoDate).push(e);
+  });
+
+  // Count sessions in current week (Monday -> Sunday)
+  let thisWeekSessions = 0;
+  const calendarCellsHtml = [];
+  for (let i = 0; i < 28; i++) {
+    const cellDate = new Date(
+      startCalDate.getFullYear(),
+      startCalDate.getMonth(),
+      startCalDate.getDate() + i
+    );
+    const cellIso = toLocalIsoDate(cellDate);
+    const isToday = cellIso === todayIso;
+    const isFuture = cellIso > todayIso;
+    const daySessions = byDateMap.get(cellIso) || [];
+    if (i >= 21 && daySessions.length > 0) {
+      thisWeekSessions += daySessions.length;
+    }
+
+    const hasA = daySessions.some((s) => s.planCode === 'A');
+    const hasB = daySessions.some((s) => s.planCode === 'B');
+    const dayVol = daySessions.reduce((acc, s) => acc + (Number(s.totalVolume) || 0), 0);
+    const daySets = daySessions.reduce((acc, s) => acc + (Number(s.completedSets) || 0), 0);
+
+    const monthShort = cellDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const wkShort = WEEKDAY_SHORT_MON_FIRST[i % 7];
+
+    let badgeHtml = `<span class="cal-rest-dot">${isFuture ? 'Upcoming' : 'Rest Day'}</span>`;
+    let cellClass = 'cal-day-rest';
+    if (hasA && hasB) {
+      cellClass = 'cal-day-both';
+      badgeHtml = `
+        <div class="cal-plan-badges">
+          <span class="plan-code-pill plan-a">PLAN A</span>
+          <span class="plan-code-pill plan-b">PLAN B</span>
+        </div>
+        <span class="cal-day-vol">${daySets} sets · ${Math.round(dayVol)} kg</span>
+      `;
+    } else if (hasA) {
+      cellClass = 'cal-day-a';
+      badgeHtml = `
+        <span class="plan-code-pill plan-a">🟦 PLAN A</span>
+        <span class="cal-day-vol">${daySets} sets · ${Math.round(dayVol)} kg</span>
+      `;
+    } else if (hasB) {
+      cellClass = 'cal-day-b';
+      badgeHtml = `
+        <span class="plan-code-pill plan-b">🟪 PLAN B</span>
+        <span class="cal-day-vol">${daySets} sets · ${Math.round(dayVol)} kg</span>
+      `;
+    }
+
+    calendarCellsHtml.push(`
+      <div class="cal-day-cell ${cellClass} ${isToday ? 'cal-today' : ''} ${isFuture ? 'cal-future' : ''}" data-history-action="open-backfill-date" data-date="${cellIso}" title="${wkShort}, ${monthShort} (${cellIso}) — Click to key in workout data for this date">
+        <div class="cal-cell-top">
+          <span class="cal-wk-name">${wkShort}</span>
+          <span class="cal-date-num">${monthShort}${isToday ? ' · TODAY' : ''}</span>
+        </div>
+        <div class="cal-cell-body">
+          ${badgeHtml}
+        </div>
+      </div>
+    `);
+  }
+
+  // Balance Coach Verdict
+  let balanceVerdict = '✅ Perfectly balanced 1:1 alternation between Plan A and Plan B!';
+  if (totalSessions === 0) {
+    balanceVerdict = '💡 Log your workout (or click "📅 Forgot to key in data?" above) to track your Plan A & Plan B day patterns.';
+  } else if (Math.abs(countA - countB) >= 2) {
+    const lagging = countA < countB ? 'Plan A (Squat · Floor Press · Row)' : 'Plan B (RDL · Overhead Press · Lunge)';
+    balanceVerdict = `⚖️ You have logged Plan A ${countA}× and Plan B ${countB}×. Prioritize ${lagging} on your next session to keep front & back muscles balanced!`;
+  }
+
+  const weekdayRowsHtml = weekdayCounts
+    .map((w) => {
+      const widthA = Math.round((w.planA / maxWeekdayTotal) * 100);
+      const widthB = Math.round((w.planB / maxWeekdayTotal) * 100);
+      let dominantTag = '<span class="wk-dom-rest">Rest / Recovery</span>';
+      if (w.planA > 0 && w.planB > 0) {
+        dominantTag = `<span class="wk-dom-mix">🟦 Plan A (${w.planA}×) &amp; 🟪 Plan B (${w.planB}×)</span>`;
+      } else if (w.planA > 0) {
+        dominantTag = `<span class="wk-dom-a">🟦 Usually Plan A (${w.planA}×)</span>`;
+      } else if (w.planB > 0) {
+        dominantTag = `<span class="wk-dom-b">🟪 Usually Plan B (${w.planB}×)</span>`;
+      }
+
+      return `
+        <div class="weekday-stat-row">
+          <div class="weekday-name-col">
+            <strong>${w.name}</strong>
+            ${dominantTag}
+          </div>
+          <div class="weekday-bar-track">
+            ${w.planA > 0 ? `<div class="weekday-bar-seg seg-a" style="width: ${widthA}%" title="Plan A: ${w.planA} sessions">${w.planA}× A</div>` : ''}
+            ${w.planB > 0 ? `<div class="weekday-bar-seg seg-b" style="width: ${widthB}%" title="Plan B: ${w.planB} sessions">${w.planB}× B</div>` : ''}
+          </div>
+          <div class="weekday-count-col">${w.total} sess.</div>
+        </div>
+      `;
+    })
+    .join('');
+
+  // Filtered History List
+  const filteredEntries =
+    historyFilterPlan === 'all'
+      ? normalized
+      : normalized.filter((e) => e.dayKey === historyFilterPlan);
+
+  const logCardsHtml =
+    filteredEntries.length === 0
+      ? `
+      <div class="history-empty">
+        <p>No ${historyFilterPlan === 'all' ? '' : historyFilterPlan === 'dayA' ? 'Plan A ' : 'Plan B '}workout sessions logged in this view.</p>
+        <button type="button" class="btn-accent btn-sm" data-history-action="restore-two-days">↺ Restore My 2-Day History (Plan A &amp; Plan B)</button>
+      </div>`
+      : filteredEntries
+          .map((entry) => {
+            const exSummary = (entry.exercises || [])
+              .map((e) => {
+                const setsStr = (e.sets || [])
+                  .map((s) => `${s.weight}kg×${s.reps}${s.completed ? '✓' : ''}`)
+                  .join(', ');
+                return `<span class="history-ex-pill"><strong>${escapeHtml(e.name)}:</strong> ${escapeHtml(setsStr)}</span>`;
+              })
+              .join('');
+
+            return `
+              <div class="history-item analysis-log-item plan-border-${entry.planCode.toLowerCase()}">
+                <div class="history-item-top">
+                  <div class="history-item-title-group">
+                    <span class="plan-code-pill plan-${entry.planCode.toLowerCase()}">${entry.planCode === 'A' ? '🟦 PLAN A' : '🟪 PLAN B'}</span>
+                    <span class="history-weekday-tag">📅 ${entry.weekdayFull} · ${entry.isoDate}</span>
+                    <span class="history-item-title">${escapeHtml(entry.dayTitle)}</span>
+                  </div>
+                  <div class="history-item-right">
+                    <span class="history-item-meta">${entry.completedSets}/${entry.totalSets} sets · <strong>${entry.totalVolume.toLocaleString()} kg</strong></span>
+                    <button type="button" class="card-order-btn danger" data-history-action="delete-entry" data-entry-id="${entry.id}" title="Delete this log entry">✕</button>
+                  </div>
+                </div>
+                <div class="history-exercises-summary">
+                  ${exSummary}
+                </div>
+              </div>
+            `;
+          })
+          .join('');
+
+  container.innerHTML = `
+    <!-- Top Hero Banner -->
+    <section class="analysis-hero-card">
+      <div class="analysis-hero-top">
+        <div>
+          <span class="exercise-order-badge">WORKOUT SCHEDULE &amp; CONSISTENCY ANALYTICS</span>
+          <h2 class="library-main-heading">Plan A &amp; Plan B — Day &amp; Schedule Analysis</h2>
+          <p class="library-main-desc">
+            Track which days of the week and calendar dates you perform <strong>🟦 Plan A (Squat · Push · Row)</strong> vs. <strong>🟪 Plan B (RDL · Press · Lunge)</strong>, monitor your moderate weekly frequency, and keep your full-body split balanced.
+          </p>
+        </div>
+        <div class="analysis-hero-actions">
+          <button type="button" class="btn-accent btn-sm" data-history-action="jump-next-plan" data-day="${nextDayKey}">
+            👉 Do Next: Plan ${nextPlanCode}
+          </button>
+          <button type="button" class="btn-ghost btn-sm forgot-data-trigger-btn" data-history-action="open-backfill-modal" title="Forgot to key in a past workout? Click to pop out the Quick-Log & Backfill window">
+            📅 Forgot to key in data?
+          </button>
+          <button type="button" class="btn-ghost btn-sm" data-history-action="restore-two-days" title="Ensure only your real 2 logged days (Plan A & Plan B) are in history">
+            ↺ Keep Only My 2 Logged Days
+          </button>
+          <button type="button" class="btn-danger-outline btn-sm" data-history-action="clear-all">
+            🗑️ Clear All
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 4 KPI Summary Cards -->
+    <section class="analysis-kpi-grid" aria-label="Plan A and Plan B Summary Metrics">
+      <div class="analysis-kpi-card">
+        <span class="kpi-label">PLAN A vs. PLAN B SPLIT</span>
+        <div class="kpi-main-row">
+          <strong class="kpi-big-val">${countA} <span class="kpi-sub-a">Plan A</span> · ${countB} <span class="kpi-sub-b">Plan B</span></strong>
+        </div>
+        <div class="split-ratio-bar">
+          <div class="split-seg-a" style="width: ${pctA}%">${pctA}% A</div>
+          <div class="split-seg-b" style="width: ${pctB}%">${pctB}% B</div>
+        </div>
+        <span class="kpi-foot">${escapeHtml(balanceVerdict)}</span>
+      </div>
+
+      <div class="analysis-kpi-card">
+        <span class="kpi-label">NEXT RECOMMENDED SESSION</span>
+        <div class="kpi-main-row">
+          <strong class="kpi-big-val">${nextPlanCode === 'A' ? '🟦 Plan A' : '🟪 Plan B'}</strong>
+          <span class="plan-code-pill plan-${nextPlanCode.toLowerCase()}">NEXT UP</span>
+        </div>
+        <p class="kpi-desc">${escapeHtml(nextPlanDesc)}</p>
+        <span class="kpi-foot">${
+          latestEntry
+            ? `Last session: Plan ${latestEntry.planCode} on ${latestEntry.weekdayFull} (${latestEntry.isoDate})`
+            : 'Start with Plan A to kick off your 2-day cycle'
+        }</span>
+      </div>
+
+      <div class="analysis-kpi-card">
+        <span class="kpi-label">USUAL TRAINING DAYS OF WEEK</span>
+        <div class="kpi-main-row">
+          <strong class="kpi-big-val">${thisWeekSessions} / 3 <span class="kpi-unit">This Week</span></strong>
+        </div>
+        <p class="kpi-desc">
+          🟦 <strong>Plan A Days:</strong> ${topDaysA.length ? topDaysA.join(', ') : 'None yet'}<br/>
+          🟪 <strong>Plan B Days:</strong> ${topDaysB.length ? topDaysB.join(', ') : 'None yet'}
+        </p>
+        <span class="kpi-foot">Moderate Sweet Spot: 2 to 3 alternating sessions / week</span>
+      </div>
+
+      <div class="analysis-kpi-card">
+        <span class="kpi-label">CUMULATIVE VOLUME BY PLAN</span>
+        <div class="kpi-main-row">
+          <strong class="kpi-big-val">${(totalVolA + totalVolB).toLocaleString()} kg</strong>
+        </div>
+        <p class="kpi-desc">
+          🟦 <strong>Plan A Vol:</strong> ${totalVolA.toLocaleString()} kg<br/>
+          🟪 <strong>Plan B Vol:</strong> ${totalVolB.toLocaleString()} kg
+        </p>
+        <span class="kpi-foot">${totalSetsAll} total sets completed across ${totalSessions} sessions</span>
+      </div>
+    </section>
+
+    <!-- Two-Column Calendar & Day-of-Week Breakdown -->
+    <section class="analysis-two-col">
+      <!-- Left: 28-Day Schedule Calendar -->
+      <div class="analysis-panel-card">
+        <div class="analysis-panel-header">
+          <div>
+            <span class="exercise-order-badge">4-WEEK CALENDAR SCHEDULE</span>
+            <h3 class="analysis-panel-title">🗓️ Which Days You Did Plan A vs. Plan B (Last 28 Days)</h3>
+          </div>
+          <div class="cal-legend">
+            <span><i class="legend-box box-a"></i> Plan A</span>
+            <span><i class="legend-box box-b"></i> Plan B</span>
+            <span><i class="legend-box box-rest"></i> Rest</span>
+          </div>
+        </div>
+        <div class="calendar-28-grid">
+          ${calendarCellsHtml.join('')}
+        </div>
+      </div>
+
+      <!-- Right: Day-of-Week Habit Distribution -->
+      <div class="analysis-panel-card">
+        <div class="analysis-panel-header">
+          <div>
+            <span class="exercise-order-badge">WEEKDAY HABIT PATTERN</span>
+            <h3 class="analysis-panel-title">📊 Day-of-Week Breakdown (Mon – Sun)</h3>
+          </div>
+        </div>
+        <div class="weekday-bars-list">
+          ${weekdayRowsHtml}
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom: Filterable Session History Log -->
+    <section class="analysis-panel-card">
+      <div class="analysis-panel-header">
+        <div>
+          <span class="exercise-order-badge">DETAILED WORKOUT LOG</span>
+          <h3 class="analysis-panel-title">📋 Logged Sessions (${filteredEntries.length})</h3>
+        </div>
+        <div class="library-filter-pills" role="group" aria-label="Filter History by Plan">
+          <button type="button" class="lib-filter-pill ${historyFilterPlan === 'all' ? 'active' : ''}" data-history-filter="all">All Sessions (${totalSessions})</button>
+          <button type="button" class="lib-filter-pill ${historyFilterPlan === 'dayA' ? 'active' : ''}" data-history-filter="dayA">🟦 Plan A Only (${countA})</button>
+          <button type="button" class="lib-filter-pill ${historyFilterPlan === 'dayB' ? 'active' : ''}" data-history-filter="dayB">🟪 Plan B Only (${countB})</button>
+        </div>
+      </div>
+      <div class="history-list">
+        ${logCardsHtml}
+      </div>
+    </section>
+
+    <!-- Auto-Backup & Data Recovery Vault -->
+    <section class="analysis-panel-card backup-vault-card" aria-label="Auto-Backup and Data Recovery Vault">
+      <div class="analysis-panel-header">
+        <div>
+          <span class="exercise-order-badge">ZERO-DATA-LOSS PROTECTION SYSTEM</span>
+          <h3 class="analysis-panel-title">🛡️ Auto-Backup &amp; Recovery Vault (Survives Code Updates &amp; Cache Resets)</h3>
+          <p class="backup-vault-desc">
+            Every logged workout and custom routine change is automatically backed up across <strong>4 independent layers</strong>: Disk File (<code>workout-backup.json</code>), Browser <code>IndexedDB</code>, Rolling Restore Snapshots, and Cross-Reload Session Memory. On every startup or code update, missing sessions are automatically recovered and merged.
+          </p>
+        </div>
+        <div class="vault-status-badges">
+          <span class="vault-pill ${backupVaultStatus.diskSynced ? 'vault-ok' : 'vault-warn'}">
+            ${backupVaultStatus.diskSynced ? '🟢 Disk File Auto-Backup (workout-backup.json)' : '🟡 Disk Sync Standby'}
+          </span>
+          <span class="vault-pill ${backupVaultStatus.idbSynced ? 'vault-ok' : 'vault-warn'}">
+            ${backupVaultStatus.idbSynced ? '🟢 IndexedDB Vault Active' : '🟡 IndexedDB Standby'}
+          </span>
+          <span class="vault-pill vault-ok">
+            📸 ${backupSnapshots.length} Restore Point${backupSnapshots.length === 1 ? '' : 's'}
+          </span>
+          <span class="vault-pill">
+            🕒 Last Saved: ${escapeHtml(backupVaultStatus.lastSavedAt || 'Synced on load')}
+          </span>
+        </div>
+      </div>
+
+      <div class="backup-vault-toolbar">
+        <div class="backup-vault-btn-group">
+          <button type="button" class="btn-accent btn-sm" data-history-action="force-recover">
+            🔄 Sync &amp; Auto-Recover from Disk / Vaults
+          </button>
+          <button type="button" class="btn-secondary btn-sm" data-history-action="create-snapshot">
+            📸 Create Manual Restore Point
+          </button>
+          <button type="button" class="btn-secondary btn-sm" data-history-action="export-backup">
+            📥 Download Backup (.json)
+          </button>
+          <button type="button" class="btn-secondary btn-sm" data-history-action="trigger-import">
+            📤 Import / Restore Backup File (.json)
+          </button>
+          <input type="file" id="backupFileInput" accept=".json,application/json" class="hidden" />
+        </div>
+
+        <label class="backup-autodownload-toggle">
+          <input type="checkbox" data-history-action="toggle-auto-download" ${appState.autoDownloadBackupOnLog ? 'checked' : ''} />
+          <span>Auto-download <code>.json</code> backup file whenever I click "Save Workout Log"</span>
+        </label>
+      </div>
+
+      <div class="snapshots-list-wrap">
+        <div class="snapshots-list-header">
+          <strong>🕒 Automatic &amp; Manual Restore Points (Click "↺ Restore" to roll back anytime)</strong>
+          <span>Up to 15 rolling snapshots preserved across code updates &amp; accidental clears</span>
+        </div>
+        ${
+          backupSnapshots.length === 0
+            ? `<div class="snapshot-empty">No restore snapshots yet — log a workout or click <strong>📸 Create Manual Restore Point</strong> to lock in a snapshot.</div>`
+            : `<div class="snapshots-grid">
+                ${backupSnapshots
+                  .slice(0, 6)
+                  .map(
+                    (snap) => `
+                  <div class="snapshot-row-card">
+                    <div class="snapshot-info">
+                      <div class="snapshot-top-line">
+                        <span class="snapshot-reason-badge">${escapeHtml(snap.reason || 'Auto-Backup')}</span>
+                        <span class="snapshot-time">${escapeHtml(snap.createdAt || '')}</span>
+                      </div>
+                      <span class="snapshot-meta">Contains <strong>${snap.sessionCount || (snap.workoutHistory ? snap.workoutHistory.length : 0)}</strong> logged workout session${(snap.sessionCount || 0) === 1 ? '' : 's'} + custom Day A/B routine</span>
+                    </div>
+                    <button type="button" class="btn-accent btn-xs" data-history-action="restore-snapshot" data-snapshot-id="${escapeHtml(snap.snapshotId)}">
+                      ↺ Restore (${snap.sessionCount || (snap.workoutHistory ? snap.workoutHistory.length : 0)})
+                    </button>
+                  </div>
+                `
+                  )
+                  .join('')}
+              </div>`
+        }
+      </div>
+    </section>
+  `;
 }
 
 /* ==========================================================================
@@ -1122,8 +2967,297 @@ workoutContainer.addEventListener('click', (e) => {
       const resolved = findExerciseProgramData(exId);
       showToast(`Switched to: ${resolved ? resolved.name : varKey}`);
     }
+    return;
   }
+
+  // 9. Card Rearrange Actions (Move Up, Move Down, Move to Other Day, Remove)
+  handleRoutineRearrangeClick(e);
 });
+
+function autoOrderRoutineDay(dayKey) {
+  const list = getDayExercises(dayKey);
+  const sorted = [...list].sort((a, b) => {
+    const rankA = classifyExercisePillar(a).sequenceRank;
+    const rankB = classifyExercisePillar(b).sequenceRank;
+    return rankA - rankB;
+  });
+  appState.customRoutine[dayKey] = sorted.map((x) => x.id);
+}
+
+function addExerciseToRoutineDay(dayKey, exId) {
+  if (!appState.customRoutine || !Array.isArray(appState.customRoutine[dayKey])) {
+    appState.customRoutine = getDefaultRoutineOrder();
+  }
+  const dayList = appState.customRoutine[dayKey];
+  const dayLabel = dayKey === 'dayA' ? 'Day A' : 'Day B';
+  if (dayList.includes(exId)) {
+    showToast(`Already in ${dayLabel}!`);
+    return false;
+  }
+  const raw = findRawExerciseById(exId);
+  if (!raw) return false;
+  ensureExerciseState(raw);
+
+  // Insert right before the final Core/Decompression slot if one is at the end
+  const lastId = dayList[dayList.length - 1];
+  const lastEx = lastId ? findRawExerciseById(lastId) : null;
+  if (lastEx && classifyExercisePillar(lastEx).key === 'core' && classifyExercisePillar(raw).key !== 'core') {
+    dayList.splice(dayList.length - 1, 0, exId);
+  } else {
+    dayList.push(exId);
+  }
+
+  saveAppState();
+  updateHeaderAndStats();
+  renderExerciseCards();
+  const evalNow = evaluateModeratePlan(dayKey);
+  if (evalNow.count > 5) {
+    showToast(`⚠️ Added "${raw.name}" (${evalNow.count} exercises on ${dayLabel} — above 5-exercise moderate cap)`);
+  } else {
+    showToast(`✓ Added "${raw.name}" to ${dayLabel} (${evalNow.count} exercises · Moderate Load)`);
+  }
+  return true;
+}
+
+function handleRoutineRearrangeClick(e) {
+  const backTrackerBtn = e.target.closest('[data-action="back-to-tracker"]');
+  if (backTrackerBtn) {
+    window.location.hash = 'tracker';
+    switchPageView('tracker');
+    return true;
+  }
+
+  const switchCoachDayBtn = e.target.closest('[data-action="coach-switch-day"]');
+  if (switchCoachDayBtn) {
+    const targetDay = switchCoachDayBtn.getAttribute('data-day');
+    if (targetDay === 'dayA' || targetDay === 'dayB') {
+      appState.activeDay = targetDay;
+      saveAppState();
+      updateHeaderAndStats();
+      renderExerciseCards();
+    }
+    return true;
+  }
+
+  const equipToggleBtn = e.target.closest('[data-action="toggle-user-equipment"]');
+  if (equipToggleBtn) {
+    const eqKey = equipToggleBtn.getAttribute('data-equip-key');
+    if (eqKey) {
+      if (!appState.availableEquipment) {
+        appState.availableEquipment = { ...DEFAULT_AVAILABLE_EQUIPMENT };
+      }
+      appState.availableEquipment[eqKey] = !appState.availableEquipment[eqKey];
+      // Ensure at least Bodyweight/Floor stays enabled if everything else is turned off
+      const anyEnabled = Object.values(appState.availableEquipment).some(Boolean);
+      if (!anyEnabled) {
+        appState.availableEquipment.bodyweight = true;
+      }
+      // If user unchecked Pull-Up Bar while B4 is set to dead-hang, automatically switch B4 to Child's Pose (No Bar)
+      if (
+        eqKey === 'pullup_bar' &&
+        !appState.availableEquipment.pullup_bar &&
+        appState.exercises['core-spinal-hang'] &&
+        appState.exercises['core-spinal-hang'].variantKey === 'dead-hang'
+      ) {
+        appState.exercises['core-spinal-hang'].variantKey = 'childs-pose';
+      }
+      saveAppState();
+      updateHeaderAndStats();
+      renderExerciseCards();
+      const statusStr = appState.availableEquipment[eqKey] ? 'Available ✓' : 'Not Available ✕';
+      showToast(`🛠️ ${EQUIPMENT_LABELS[eqKey] || eqKey}: ${statusStr} (Suggestions updated)`);
+    }
+    return true;
+  }
+
+  const swapEquipBtn = e.target.closest('[data-action="coach-swap-equipment"]');
+  if (swapEquipBtn) {
+    const dKey = swapEquipBtn.getAttribute('data-day') || appState.activeDay;
+    const evalNow = evaluateModeratePlan(dKey);
+    const arr = appState.customRoutine[dKey];
+    if (arr && evalNow.equipmentMismatches.length > 0) {
+      evalNow.equipmentMismatches.forEach((m) => {
+        if (m.exId === 'core-spinal-hang' && m.reqKey === 'pullup_bar') {
+          if (appState.exercises['core-spinal-hang']) {
+            appState.exercises['core-spinal-hang'].variantKey = 'childs-pose';
+          }
+        } else if (m.replacementId && !arr.includes(m.replacementId)) {
+          arr[m.index] = m.replacementId;
+          const rawRep = findRawExerciseById(m.replacementId);
+          if (rawRep) ensureExerciseState(rawRep);
+        }
+      });
+      saveAppState();
+      updateHeaderAndStats();
+      renderExerciseCards();
+      showToast('🔄 Swapped exercises to match your available equipment!');
+    }
+    return true;
+  }
+
+  const moveUpBtn = e.target.closest('[data-action="move-ex-up"]');
+  if (moveUpBtn) {
+    const dKey = moveUpBtn.getAttribute('data-day');
+    const idx = Number(moveUpBtn.getAttribute('data-index'));
+    const arr = appState.customRoutine[dKey];
+    if (arr && idx > 0 && idx < arr.length) {
+      const tmp = arr[idx - 1];
+      arr[idx - 1] = arr[idx];
+      arr[idx] = tmp;
+      saveAppState();
+      updateHeaderAndStats();
+      renderExerciseCards();
+      showToast('Moved exercise earlier in sequence.');
+    }
+    return true;
+  }
+
+  const moveDownBtn = e.target.closest('[data-action="move-ex-down"]');
+  if (moveDownBtn) {
+    const dKey = moveDownBtn.getAttribute('data-day');
+    const idx = Number(moveDownBtn.getAttribute('data-index'));
+    const arr = appState.customRoutine[dKey];
+    if (arr && idx >= 0 && idx < arr.length - 1) {
+      const tmp = arr[idx + 1];
+      arr[idx + 1] = arr[idx];
+      arr[idx] = tmp;
+      saveAppState();
+      updateHeaderAndStats();
+      renderExerciseCards();
+      showToast('Moved exercise later in sequence.');
+    }
+    return true;
+  }
+
+  const transferBtn = e.target.closest('[data-action="transfer-ex-day"]');
+  if (transferBtn) {
+    const fromDay = transferBtn.getAttribute('data-from-day');
+    const toDay = fromDay === 'dayA' ? 'dayB' : 'dayA';
+    const idx = Number(transferBtn.getAttribute('data-index'));
+    const fromArr = appState.customRoutine[fromDay];
+    const toArr = appState.customRoutine[toDay];
+    if (fromArr && toArr && fromArr.length > 1 && idx >= 0 && idx < fromArr.length) {
+      const [movedId] = fromArr.splice(idx, 1);
+      if (!toArr.includes(movedId)) {
+        toArr.push(movedId);
+      }
+      saveAppState();
+      updateHeaderAndStats();
+      renderExerciseCards();
+      const movedEx = findRawExerciseById(movedId);
+      showToast(`Moved "${movedEx ? movedEx.name : movedId}" to ${toDay === 'dayA' ? 'Day A' : 'Day B'}`);
+    } else if (fromArr && fromArr.length <= 1) {
+      showToast('Keep at least 1 exercise on each workout day.');
+    }
+    return true;
+  }
+
+  const removeBtn = e.target.closest('[data-action="remove-ex-day"]');
+  if (removeBtn) {
+    const dKey = removeBtn.getAttribute('data-day');
+    const idx = Number(removeBtn.getAttribute('data-index'));
+    const arr = appState.customRoutine[dKey];
+    if (arr && arr.length > 1 && idx >= 0 && idx < arr.length) {
+      const [removedId] = arr.splice(idx, 1);
+      saveAppState();
+      updateHeaderAndStats();
+      renderExerciseCards();
+      const remEx = findRawExerciseById(removedId);
+      showToast(`Removed "${remEx ? remEx.name : removedId}" from ${dKey === 'dayA' ? 'Day A' : 'Day B'}`);
+    }
+    return true;
+  }
+
+  const toggleBuilderBtn = e.target.closest('[data-action="toggle-plan-builder"]');
+  if (toggleBuilderBtn) {
+    appState.planAssistantOpen = !appState.planAssistantOpen;
+    saveAppState();
+    renderModerateCoachWidget();
+    return true;
+  }
+
+  const autoOrderBtn = e.target.closest('[data-action="coach-auto-order"]');
+  if (autoOrderBtn) {
+    const dKey = autoOrderBtn.getAttribute('data-day') || appState.activeDay;
+    autoOrderRoutineDay(dKey);
+    saveAppState();
+    updateHeaderAndStats();
+    renderExerciseCards();
+    showToast('✨ Auto-ordered: Compound Legs → Upper Push/Pull → Core & Decompression!');
+    return true;
+  }
+
+  const autoOrderBothBtn = e.target.closest('[data-action="coach-auto-order-both"]');
+  if (autoOrderBothBtn) {
+    autoOrderRoutineDay('dayA');
+    autoOrderRoutineDay('dayB');
+    saveAppState();
+    updateHeaderAndStats();
+    renderExerciseCards();
+    showToast('✨ Auto-ordered both Day A & Day B for optimal energy & spine safety!');
+    return true;
+  }
+
+  const trimBtn = e.target.closest('[data-action="coach-trim-moderate"]');
+  if (trimBtn) {
+    const dKey = trimBtn.getAttribute('data-day') || appState.activeDay;
+    autoOrderRoutineDay(dKey);
+    const arr = appState.customRoutine[dKey];
+    if (arr && arr.length > 5) {
+      // Keep the first 4 core compounds + the final decompression exercise
+      const lastCore = arr[arr.length - 1];
+      appState.customRoutine[dKey] = [...arr.slice(0, 4), lastCore];
+      saveAppState();
+      updateHeaderAndStats();
+      renderExerciseCards();
+      showToast('⚖️ Trimmed to 5 exercises (15 sets) — back in the Moderate Sweet Spot!');
+    }
+    return true;
+  }
+
+  const quickAddPillarBtn = e.target.closest('[data-action="coach-add-exercise"]');
+  if (quickAddPillarBtn) {
+    const dKey = quickAddPillarBtn.getAttribute('data-day') || appState.activeDay;
+    const exId = quickAddPillarBtn.getAttribute('data-ex-id');
+    if (exId) addExerciseToRoutineDay(dKey, exId);
+    return true;
+  }
+
+  const selectAddBtn = e.target.closest('[data-action="builder-select-add"]');
+  if (selectAddBtn) {
+    const dKey = selectAddBtn.getAttribute('data-day');
+    const sel = document.getElementById(`quickAddSelect-${dKey}`);
+    if (sel && sel.value) {
+      addExerciseToRoutineDay(dKey, sel.value);
+    }
+    return true;
+  }
+
+  const resetDefaultBtn = e.target.closest('[data-action="coach-reset-default-plan"]');
+  if (resetDefaultBtn) {
+    appState.customRoutine = getDefaultRoutineOrder();
+    saveAppState();
+    updateHeaderAndStats();
+    renderExerciseCards();
+    showToast('↺ Restored Default Moderate 2-Day Full-Body Plan!');
+    return true;
+  }
+
+  return false;
+}
+
+if (togglePlanAssistantBtn) {
+  togglePlanAssistantBtn.addEventListener('click', () => {
+    window.location.hash = 'planner';
+    switchPageView('planner');
+  });
+}
+
+if (moderateCoachWidget) {
+  moderateCoachWidget.addEventListener('click', (e) => {
+    handleRoutineRearrangeClick(e);
+  });
+}
 
 workoutContainer.addEventListener('input', (e) => {
   const target = e.target;
@@ -1148,13 +3282,12 @@ workoutContainer.addEventListener('input', (e) => {
 
 function findExerciseProgramData(exId) {
   for (const dayKey of ['dayA', 'dayB']) {
-    const found = WORKOUT_PROGRAM[dayKey].exercises.find((x) => x.id === exId);
-    if (found) return getResolvedExerciseData(found);
+    const dayExs = getDayExercises(dayKey);
+    const foundInRoutine = dayExs.find((x) => x.id === exId);
+    if (foundInRoutine) return foundInRoutine;
   }
-  if (typeof EXERCISE_LIBRARY_DATA !== 'undefined') {
-    const libFound = EXERCISE_LIBRARY_DATA.find((x) => x.id === exId);
-    if (libFound) return libFound;
-  }
+  const raw = findRawExerciseById(exId);
+  if (raw) return getResolvedExerciseData(raw);
   return null;
 }
 
@@ -1168,7 +3301,8 @@ function updateSingleExerciseCardDOM(exId) {
   card.classList.toggle('card-completed', allSetsDone);
   const badge = card.querySelector('.exercise-order-badge');
   if (badge && programEx) {
-    badge.textContent = `${programEx.order} · ${allSetsDone ? 'COMPLETED' : '3D MUSCLE MAP'}`;
+    const pillarInfo = classifyExercisePillar(programEx);
+    badge.textContent = `${programEx.order} · ${pillarInfo.label} · ${allSetsDone ? 'COMPLETED' : '3D MUSCLE MAP'}`;
   }
 
   const pills = card.querySelectorAll('.set-pill');
@@ -1192,9 +3326,10 @@ function updateSingleExerciseCardDOM(exId) {
 
 resetDayBtn.addEventListener('click', () => {
   const dayKey = appState.activeDay;
-  const dayData = WORKOUT_PROGRAM[dayKey];
-  dayData.exercises.forEach((ex) => {
-    appState.exercises[ex.id].sets.forEach((s) => {
+  const exercises = getDayExercises(dayKey);
+  exercises.forEach((ex) => {
+    const exState = ensureExerciseState(ex);
+    exState.sets.forEach((s) => {
       s.completed = false;
     });
   });
@@ -1206,7 +3341,7 @@ resetDayBtn.addEventListener('click', () => {
 
 logWorkoutBtn.addEventListener('click', () => {
   const dayKey = appState.activeDay;
-  const dayData = WORKOUT_PROGRAM[dayKey];
+  const exercises = getDayExercises(dayKey);
   const stats = calculateDayStats(dayKey);
 
   const now = new Date();
@@ -1220,31 +3355,410 @@ logWorkoutBtn.addEventListener('click', () => {
   const entry = {
     id: Date.now(),
     dayKey,
-    dayTitle: dayKey === 'dayA' ? 'Day A (Squat · Floor Press · Row)' : 'Day B (RDL · OHP · Lunge)',
+    dayTitle: dayKey === 'dayA' ? 'Day A Full-Body Routine' : 'Day B Full-Body Routine',
+    isoDate: toLocalIsoDate(now),
+    weekdayIdx: getMonFirstWeekdayIdx(now),
     timestamp: formattedDate,
     completedSets: stats.completedSets,
+    totalSets: stats.totalSets,
     totalVolume: stats.totalVolume,
-    exercises: dayData.exercises.map((ex) => ({
+    exercises: exercises.map((ex) => ({
       id: ex.id,
       name: ex.name,
-      sets: appState.exercises[ex.id].sets.map((s) => ({ ...s }))
+      sets: ensureExerciseState(ex).sets.map((s) => ({ ...s }))
     }))
   };
 
   workoutHistory.unshift(entry);
-  if (workoutHistory.length > 30) {
-    workoutHistory = workoutHistory.slice(0, 30);
+  if (workoutHistory.length > 100) {
+    workoutHistory = workoutHistory.slice(0, 100);
   }
-  saveWorkoutHistory();
+  saveWorkoutHistory({
+    reason: `Logged ${dayKey === 'dayA' ? 'Plan A' : 'Plan B'} (${entry.isoDate})`
+  });
+  if (appState.autoDownloadBackupOnLog) {
+    exportBackupJsonFile(`pulselift-auto-backup-${dayKey}`);
+  }
   renderHistoryPanel();
   historyDrawer.classList.remove('hidden');
   toggleHistoryBtn.setAttribute('aria-expanded', 'true');
-  showToast('Workout session saved to localStorage history!');
+  showToast(`🛡️ Logged & Auto-Backed Up ${dayKey === 'dayA' ? 'Plan A' : 'Plan B'} (${WEEKDAY_NAMES_FULL[entry.weekdayIdx]})!`);
 });
+
+function backfillWorkoutOnDate(dayKey, isoDateStr, customExercisesList = null) {
+  const targetDayKey = dayKey === 'dayB' ? 'dayB' : 'dayA';
+  const exercises = getDayExercises(targetDayKey);
+  const stats = calculateDayStats(targetDayKey);
+
+  // Parse YYYY-MM-DD in local time at 18:00
+  let dateObj = new Date();
+  if (isoDateStr && /^\d{4}-\d{2}-\d{2}$/.test(isoDateStr)) {
+    const [y, m, d] = isoDateStr.split('-').map(Number);
+    dateObj = new Date(y, m - 1, d, 18, 0, 0);
+  }
+
+  const formattedDate = dateObj.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  const resolvedExercises = Array.isArray(customExercisesList) && customExercisesList.length > 0
+    ? customExercisesList
+    : exercises.map((ex) => ({
+        id: ex.id,
+        name: ex.name,
+        sets: ensureExerciseState(ex).sets.map((s) => ({ ...s, completed: true }))
+      }));
+
+  let totalSets = 0;
+  let completedSets = 0;
+  let calcVol = 0;
+  resolvedExercises.forEach((ex) => {
+    (ex.sets || []).forEach((s) => {
+      totalSets += 1;
+      if (s.completed !== false) {
+        completedSets += 1;
+        const w = Number(s.weight) || 0;
+        const r = Number(s.reps) || 0;
+        if (w > 0 && r > 0) calcVol += w * r;
+      }
+    });
+  });
+
+  const entry = {
+    id: dateObj.getTime() + Math.floor(Math.random() * 900),
+    dayKey: targetDayKey,
+    dayTitle: targetDayKey === 'dayA' ? 'Day A Full-Body Routine' : 'Day B Full-Body Routine',
+    isoDate: toLocalIsoDate(dateObj),
+    weekdayIdx: getMonFirstWeekdayIdx(dateObj),
+    timestamp: formattedDate,
+    completedSets: completedSets || totalSets || stats.totalSets,
+    totalSets: totalSets || stats.totalSets,
+    totalVolume: Math.round(calcVol),
+    exercises: resolvedExercises
+  };
+
+  workoutHistory.unshift(entry);
+  workoutHistory.sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+  if (workoutHistory.length > 100) {
+    workoutHistory = workoutHistory.slice(0, 100);
+  }
+  saveWorkoutHistory({
+    reason: `Backfilled ${targetDayKey === 'dayA' ? 'Plan A' : 'Plan B'} (${entry.isoDate})`
+  });
+  renderHistoryPanel();
+  showToast(
+    `📅 Logged & Backed Up ${targetDayKey === 'dayA' ? '🟦 Plan A' : '🟪 Plan B'} on ${WEEKDAY_NAMES_FULL[entry.weekdayIdx]} (${entry.isoDate})`
+  );
+}
+
+/* ==========================================================================
+   "Forgot to Key In Data?" Pop-Out Modal (Quick-Log & Custom Backfill)
+   ========================================================================== */
+const backfillWorkoutModal = document.getElementById('backfillWorkoutModal');
+const backfillModalContent = document.getElementById('backfillModalContent');
+const openBackfillModalBtn = document.getElementById('openBackfillModalBtn');
+const closeBackfillModalBtn = document.getElementById('closeBackfillModalBtn');
+
+const backfillModalState = {
+  isoDate: toLocalIsoDate(new Date()),
+  dayKey: 'dayA',
+  draftExercises: {} // { dayA: [...], dayB: [...] }
+};
+
+function buildBackfillDraftForDay(dayKey) {
+  const exercises = getDayExercises(dayKey);
+  return exercises.map((ex) => {
+    const st = ensureExerciseState(ex);
+    return {
+      id: ex.id,
+      name: ex.name,
+      scheme: ex.scheme || ex.prescription || '3 sets',
+      sets: st.sets.map((s) => ({
+        weight: Number(s.weight) || 0,
+        reps: Number(s.reps) || 10,
+        completed: true
+      }))
+    };
+  });
+}
+
+function openBackfillModal(initialIsoDate = null, initialDayKey = null) {
+  if (!backfillWorkoutModal) return;
+  backfillModalState.isoDate =
+    initialIsoDate && /^\d{4}-\d{2}-\d{2}$/.test(initialIsoDate)
+      ? initialIsoDate
+      : toLocalIsoDate(new Date());
+  backfillModalState.dayKey =
+    initialDayKey === 'dayB' || initialDayKey === 'dayA'
+      ? initialDayKey
+      : appState.activeDay || 'dayA';
+  backfillModalState.draftExercises = {
+    dayA: buildBackfillDraftForDay('dayA'),
+    dayB: buildBackfillDraftForDay('dayB')
+  };
+  renderBackfillModalContent();
+  backfillWorkoutModal.classList.remove('hidden');
+}
+
+function closeBackfillModal() {
+  if (!backfillWorkoutModal) return;
+  backfillWorkoutModal.classList.add('hidden');
+}
+
+function getRelativeIsoDate(daysAgo) {
+  const dt = new Date();
+  dt.setDate(dt.getDate() - daysAgo);
+  return toLocalIsoDate(dt);
+}
+
+function renderBackfillModalContent() {
+  if (!backfillModalContent) return;
+  const iso = backfillModalState.isoDate;
+  const dKey = backfillModalState.dayKey;
+  const todayIso = toLocalIsoDate(new Date());
+  const yestIso = getRelativeIsoDate(1);
+  const twoDaysAgoIso = getRelativeIsoDate(2);
+  const threeDaysAgoIso = getRelativeIsoDate(3);
+
+  const [y, m, d] = iso.split('-').map(Number);
+  const selDateObj = new Date(y, m - 1, d, 12, 0, 0);
+  const wkName = WEEKDAY_NAMES_FULL[getMonFirstWeekdayIdx(selDateObj)] || 'Day';
+
+  if (!backfillModalState.draftExercises[dKey]) {
+    backfillModalState.draftExercises[dKey] = buildBackfillDraftForDay(dKey);
+  }
+  const draftList = backfillModalState.draftExercises[dKey];
+
+  let totalVol = 0;
+  let totalSets = 0;
+  draftList.forEach((ex) => {
+    ex.sets.forEach((s) => {
+      totalSets += 1;
+      const w = Number(s.weight) || 0;
+      const r = Number(s.reps) || 0;
+      if (w > 0 && r > 0) totalVol += w * r;
+    });
+  });
+
+  const exercisesEditorHtml = draftList
+    .map(
+      (ex, exIdx) => `
+      <div class="backfill-ex-card">
+        <div class="backfill-ex-header">
+          <strong>${escapeHtml(ex.name)}</strong>
+          <span class="rep-scheme-badge">${escapeHtml(ex.scheme)}</span>
+        </div>
+        <div class="backfill-sets-row">
+          ${ex.sets
+            .map(
+              (s, setIdx) => `
+              <div class="backfill-set-chip">
+                <span class="backfill-set-num">Set ${setIdx + 1}</span>
+                <label class="backfill-mini-field">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value="${s.weight}"
+                    data-backfill-input="weight"
+                    data-ex-idx="${exIdx}"
+                    data-set-idx="${setIdx}"
+                  />
+                  <span>kg</span>
+                </label>
+                <span class="backfill-mult">×</span>
+                <label class="backfill-mini-field">
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value="${s.reps}"
+                    data-backfill-input="reps"
+                    data-ex-idx="${exIdx}"
+                    data-set-idx="${setIdx}"
+                  />
+                  <span>reps</span>
+                </label>
+              </div>
+            `
+            )
+            .join('')}
+        </div>
+      </div>
+    `
+    )
+    .join('');
+
+  backfillModalContent.innerHTML = `
+    <!-- Quick 1-Click Bar (Matches the Quick-Log bar from before, now inside the pop-out) -->
+    <div class="quick-backfill-bar modal-quick-bar">
+      <div class="backfill-date-group">
+        <span class="backfill-label">📅 WORKOUT DATE:</span>
+        <input type="date" id="backfillDateInput" class="backfill-date-input" value="${iso}" aria-label="Select date to log workout" />
+        <span class="history-weekday-tag">🗓️ ${wkName} (${iso})</span>
+      </div>
+      <div class="backfill-date-presets">
+        <button type="button" class="lib-filter-pill ${iso === todayIso ? 'active' : ''}" data-backfill-date="${todayIso}">Today</button>
+        <button type="button" class="lib-filter-pill ${iso === yestIso ? 'active' : ''}" data-backfill-date="${yestIso}">Yesterday</button>
+        <button type="button" class="lib-filter-pill ${iso === twoDaysAgoIso ? 'active' : ''}" data-backfill-date="${twoDaysAgoIso}">2 Days Ago</button>
+        <button type="button" class="lib-filter-pill ${iso === threeDaysAgoIso ? 'active' : ''}" data-backfill-date="${threeDaysAgoIso}">3 Days Ago</button>
+      </div>
+    </div>
+
+    <!-- Fast 1-Click Log Buttons -->
+    <div class="backfill-instant-row">
+      <span class="backfill-instant-label">⚡ 1-Click Quick-Log (Uses Saved Weights):</span>
+      <div class="backfill-instant-btns">
+        <button type="button" class="lib-filter-pill plan-a-btn" data-backfill-action="instant-log" data-day="dayA">
+          + Log 🟦 Plan A on ${iso}
+        </button>
+        <button type="button" class="lib-filter-pill plan-b-btn" data-backfill-action="instant-log" data-day="dayB">
+          + Log 🟪 Plan B on ${iso}
+        </button>
+      </div>
+    </div>
+
+    <!-- Or Key In / Customize Weights & Reps for Selected Plan -->
+    <div class="backfill-custom-section">
+      <div class="backfill-custom-header">
+        <div>
+          <span class="exercise-order-badge">OPTIONAL: REVIEW OR ADJUST WEIGHTS &amp; REPS</span>
+          <h3 class="backfill-sub-title">Key In Exact Sets for ${wkName} (${iso})</h3>
+        </div>
+        <div class="library-filter-pills" role="group" aria-label="Select Plan to Edit">
+          <button type="button" class="lib-filter-pill ${dKey === 'dayA' ? 'active' : ''}" data-backfill-action="select-plan" data-day="dayA">
+            🟦 Edit Plan A Sets
+          </button>
+          <button type="button" class="lib-filter-pill ${dKey === 'dayB' ? 'active' : ''}" data-backfill-action="select-plan" data-day="dayB">
+            🟪 Edit Plan B Sets
+          </button>
+        </div>
+      </div>
+
+      <div class="backfill-ex-grid">
+        ${exercisesEditorHtml}
+      </div>
+
+      <div class="backfill-modal-footer">
+        <div class="backfill-vol-summary">
+          <span>Selected: <strong>${dKey === 'dayA' ? '🟦 Plan A' : '🟪 Plan B'}</strong> on <strong>${wkName}, ${iso}</strong></span>
+          <span>· <strong>${totalSets} sets</strong> · <strong id="backfillLiveVolText">${Math.round(totalVol).toLocaleString()} kg</strong> total volume</span>
+        </div>
+        <div class="backfill-footer-btns">
+          <button type="button" class="btn-secondary btn-sm" data-backfill-action="close">Cancel</button>
+          <button type="button" class="btn-accent btn-sm" data-backfill-action="save-custom">
+            ✅ Save &amp; Key In ${dKey === 'dayA' ? 'Plan A' : 'Plan B'} on ${iso}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+if (openBackfillModalBtn) {
+  openBackfillModalBtn.addEventListener('click', () => {
+    openBackfillModal(null, appState.activeDay);
+  });
+}
+
+if (closeBackfillModalBtn) {
+  closeBackfillModalBtn.addEventListener('click', closeBackfillModal);
+}
+
+if (backfillWorkoutModal) {
+  backfillWorkoutModal.addEventListener('click', (e) => {
+    if (e.target === backfillWorkoutModal) {
+      closeBackfillModal();
+      return;
+    }
+
+    const datePresetBtn = e.target.closest('[data-backfill-date]');
+    if (datePresetBtn) {
+      backfillModalState.isoDate = datePresetBtn.getAttribute('data-backfill-date');
+      renderBackfillModalContent();
+      return;
+    }
+
+    const actBtn = e.target.closest('[data-backfill-action]');
+    if (!actBtn) return;
+    const act = actBtn.getAttribute('data-backfill-action');
+
+    if (act === 'close') {
+      closeBackfillModal();
+    } else if (act === 'select-plan') {
+      backfillModalState.dayKey = actBtn.getAttribute('data-day') || 'dayA';
+      renderBackfillModalContent();
+    } else if (act === 'instant-log') {
+      const targetDay = actBtn.getAttribute('data-day') || 'dayA';
+      const dateInput = document.getElementById('backfillDateInput');
+      const isoVal = dateInput ? dateInput.value : backfillModalState.isoDate;
+      backfillWorkoutOnDate(targetDay, isoVal);
+      closeBackfillModal();
+    } else if (act === 'save-custom') {
+      const dateInput = document.getElementById('backfillDateInput');
+      const isoVal = dateInput ? dateInput.value : backfillModalState.isoDate;
+      const targetDay = backfillModalState.dayKey;
+      const customExs = backfillModalState.draftExercises[targetDay] || null;
+      backfillWorkoutOnDate(targetDay, isoVal, customExs);
+      closeBackfillModal();
+    }
+  });
+
+  backfillWorkoutModal.addEventListener('change', (e) => {
+    if (e.target && e.target.id === 'backfillDateInput' && e.target.value) {
+      backfillModalState.isoDate = e.target.value;
+      renderBackfillModalContent();
+    }
+  });
+
+  backfillWorkoutModal.addEventListener('input', (e) => {
+    const inp = e.target;
+    const field = inp.getAttribute('data-backfill-input');
+    if (!field) return;
+    const exIdx = Number(inp.getAttribute('data-ex-idx'));
+    const setIdx = Number(inp.getAttribute('data-set-idx'));
+    const dKey = backfillModalState.dayKey;
+    const list = backfillModalState.draftExercises[dKey];
+    if (!list || !list[exIdx] || !list[exIdx].sets[setIdx]) return;
+    const val = Math.max(0, Number(inp.value) || 0);
+    if (field === 'weight') {
+      list[exIdx].sets[setIdx].weight = val;
+    } else if (field === 'reps') {
+      list[exIdx].sets[setIdx].reps = val;
+    }
+    let totalVol = 0;
+    list.forEach((ex) => {
+      ex.sets.forEach((s) => {
+        const w = Number(s.weight) || 0;
+        const r = Number(s.reps) || 0;
+        if (w > 0 && r > 0) totalVol += w * r;
+      });
+    });
+    const volEl = document.getElementById('backfillLiveVolText');
+    if (volEl) volEl.textContent = `${Math.round(totalVol).toLocaleString()} kg`;
+  });
+}
+
+function resetToTwoDayRealHistory() {
+  workoutHistory = getInitialTwoDaysHistory();
+  saveWorkoutHistory({
+    reason: 'Restored 2-Day History (Plan A & Plan B)',
+    replaceExactHistory: true
+  });
+  renderHistoryPanel();
+  showToast('✅ Restored your 2 days of workout history (1× Plan A, 1× Plan B)!');
+}
 
 toggleHistoryBtn.addEventListener('click', () => {
   const isHidden = historyDrawer.classList.toggle('hidden');
   toggleHistoryBtn.setAttribute('aria-expanded', String(!isHidden));
+  if (!isHidden) {
+    renderHistoryPanel();
+    historyDrawer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 });
 
 closeHistoryBtn.addEventListener('click', () => {
@@ -1253,10 +3767,44 @@ closeHistoryBtn.addEventListener('click', () => {
 });
 
 clearHistoryBtn.addEventListener('click', () => {
+  if (workoutHistory.length > 0) {
+    createBackupSnapshot('Pre-Clear Safety Backup');
+  }
   workoutHistory = [];
-  saveWorkoutHistory();
+  saveWorkoutHistory({ reason: 'Cleared History', allowEmptyOverwrite: true });
   renderHistoryPanel();
-  showToast('Workout history cleared.');
+  showToast('Workout history cleared (Safety Snapshot saved in Backup Vault — click Restore anytime).');
+});
+
+historyDrawer.addEventListener('click', (e) => {
+  const openBackfillBtn = e.target.closest('[data-open-backfill-modal]');
+  if (openBackfillBtn) {
+    openBackfillModal(null, appState.activeDay);
+    return;
+  }
+
+  const openAnalysisBtn = e.target.closest('[data-open-history-analysis]');
+  if (openAnalysisBtn) {
+    historyDrawer.classList.add('hidden');
+    toggleHistoryBtn.setAttribute('aria-expanded', 'false');
+    window.location.hash = 'history';
+    switchPageView('history');
+    return;
+  }
+
+  const backupActBtn = e.target.closest('[data-drawer-backup]');
+  if (backupActBtn) {
+    const act = backupActBtn.getAttribute('data-drawer-backup');
+    if (act === 'restore-latest') {
+      const snapId = backupActBtn.getAttribute('data-snapshot-id');
+      if (snapId) restoreFromSnapshot(snapId);
+    } else if (act === 'sync-recover') {
+      initAutoBackupAndRecovery(true);
+    } else if (act === 'export-json') {
+      exportBackupJsonFile();
+      showToast('📥 Downloaded workout backup JSON file!');
+    }
+  }
 });
 
 /* ==========================================================================
@@ -2572,9 +5120,14 @@ const EXERCISE_LIBRARY_DATA = [
 ];
 
 const navTrackerPageBtn = document.getElementById('navTrackerPageBtn');
+const navPlannerPageBtn = document.getElementById('navPlannerPageBtn');
 const navLibraryPageBtn = document.getElementById('navLibraryPageBtn');
+const navHistoryPageBtn = document.getElementById('navHistoryPageBtn');
 const trackerPageView = document.getElementById('trackerPageView');
+const plannerPageView = document.getElementById('plannerPageView');
 const libraryPageView = document.getElementById('libraryPageView');
+const historyPageView = document.getElementById('historyPageView');
+const historyAnalysisPageContainer = document.getElementById('historyAnalysisPageContainer');
 
 const librarySearchInput = document.getElementById('librarySearchInput');
 const clearLibrarySearchBtn = document.getElementById('clearLibrarySearchBtn');
@@ -2930,13 +5483,33 @@ function renderExerciseLibrarySections() {
                   <span class="lib-meta-chip">📐 ${escapeHtml(ex.mechanic)}</span>
                   <span class="lib-meta-chip">📊 ${escapeHtml(ex.difficulty)}</span>
                 </div>
-                <button
-                  type="button"
-                  class="quick-rest-trigger"
-                  data-open-studio="${ex.id}"
-                >
-                  🔍 Inspect 360° Form
-                </button>
+                <div class="lib-card-actions-group">
+                  <button
+                    type="button"
+                    class="lib-add-day-btn"
+                    data-lib-add-day="dayA"
+                    data-lib-ex-id="${ex.id}"
+                    title="Add ${escapeHtml(ex.name)} to Day A Routine"
+                  >
+                    + Day A
+                  </button>
+                  <button
+                    type="button"
+                    class="lib-add-day-btn"
+                    data-lib-add-day="dayB"
+                    data-lib-ex-id="${ex.id}"
+                    title="Add ${escapeHtml(ex.name)} to Day B Routine"
+                  >
+                    + Day B
+                  </button>
+                  <button
+                    type="button"
+                    class="quick-rest-trigger"
+                    data-open-studio="${ex.id}"
+                  >
+                    🔍 360° Form
+                  </button>
+                </div>
               </div>
             </article>
           `;
@@ -3061,18 +5634,31 @@ function resetAllLibraryFilters() {
 }
 
 function switchPageView(pageName) {
-  libraryState.activePage = pageName === 'library' ? 'library' : 'tracker';
+  const validPages = ['tracker', 'planner', 'library', 'history'];
+  libraryState.activePage = validPages.includes(pageName) ? pageName : 'tracker';
+  const isTrack = libraryState.activePage === 'tracker';
+  const isPlan = libraryState.activePage === 'planner';
   const isLib = libraryState.activePage === 'library';
+  const isHist = libraryState.activePage === 'history';
 
-  if (trackerPageView) trackerPageView.classList.toggle('hidden', isLib);
+  if (trackerPageView) trackerPageView.classList.toggle('hidden', !isTrack);
+  if (plannerPageView) plannerPageView.classList.toggle('hidden', !isPlan);
   if (libraryPageView) libraryPageView.classList.toggle('hidden', !isLib);
-  if (navTrackerPageBtn) navTrackerPageBtn.classList.toggle('active', !isLib);
+  if (historyPageView) historyPageView.classList.toggle('hidden', !isHist);
+
+  if (navTrackerPageBtn) navTrackerPageBtn.classList.toggle('active', isTrack);
+  if (navPlannerPageBtn) navPlannerPageBtn.classList.toggle('active', isPlan);
   if (navLibraryPageBtn) navLibraryPageBtn.classList.toggle('active', isLib);
+  if (navHistoryPageBtn) navHistoryPageBtn.classList.toggle('active', isHist);
 
   if (isLib) {
     initLibraryMannequinFilter();
     syncDummyVisualState();
     renderExerciseLibrarySections();
+  } else if (isHist) {
+    renderHistoryAnalysisPage();
+  } else if (isPlan) {
+    renderModerateCoachWidget();
   } else {
     renderExerciseCards();
   }
@@ -3085,6 +5671,13 @@ if (navTrackerPageBtn) {
   });
 }
 
+if (navPlannerPageBtn) {
+  navPlannerPageBtn.addEventListener('click', () => {
+    window.location.hash = 'planner';
+    switchPageView('planner');
+  });
+}
+
 if (navLibraryPageBtn) {
   navLibraryPageBtn.addEventListener('click', () => {
     window.location.hash = 'library';
@@ -3092,9 +5685,115 @@ if (navLibraryPageBtn) {
   });
 }
 
+if (navHistoryPageBtn) {
+  navHistoryPageBtn.addEventListener('click', () => {
+    window.location.hash = 'history';
+    switchPageView('history');
+  });
+}
+
+if (historyAnalysisPageContainer) {
+  historyAnalysisPageContainer.addEventListener('click', (e) => {
+    const filterBtn = e.target.closest('[data-history-filter]');
+    if (filterBtn) {
+      historyFilterPlan = filterBtn.getAttribute('data-history-filter') || 'all';
+      renderHistoryAnalysisPage();
+      return;
+    }
+
+    const actionBtn = e.target.closest('[data-history-action]');
+    if (!actionBtn) return;
+
+    const act = actionBtn.getAttribute('data-history-action');
+    if (act === 'open-backfill-modal') {
+      openBackfillModal(null, appState.activeDay);
+    } else if (act === 'open-backfill-date') {
+      const clickedDate = actionBtn.getAttribute('data-date') || toLocalIsoDate(new Date());
+      openBackfillModal(clickedDate, appState.activeDay);
+    } else if (act === 'backfill-day') {
+      const dKey = actionBtn.getAttribute('data-day') || 'dayA';
+      const dateInput = document.getElementById('backfillDateInput');
+      const isoVal = dateInput ? dateInput.value : toLocalIsoDate(new Date());
+      backfillWorkoutOnDate(dKey, isoVal);
+    } else if (act === 'restore-two-days') {
+      resetToTwoDayRealHistory();
+    } else if (act === 'jump-next-plan') {
+      const nextDay = actionBtn.getAttribute('data-day') || 'dayA';
+      appState.activeDay = nextDay === 'dayB' ? 'dayB' : 'dayA';
+      saveAppState();
+      updateHeaderAndStats();
+      window.location.hash = 'tracker';
+      switchPageView('tracker');
+      showToast(`Switched to ${appState.activeDay === 'dayA' ? '🟦 Plan A' : '🟪 Plan B'} workout tracker!`);
+    } else if (act === 'delete-entry') {
+      const entryId = Number(actionBtn.getAttribute('data-entry-id'));
+      createBackupSnapshot('Pre-Delete Safety Backup');
+      workoutHistory = workoutHistory.filter((h) => Number(h.id) !== entryId);
+      saveWorkoutHistory({ reason: 'Deleted Single Session', replaceExactHistory: true });
+      renderHistoryPanel();
+      showToast('Removed session (Safety Snapshot saved in Backup Vault).');
+    } else if (act === 'clear-all') {
+      if (workoutHistory.length > 0) {
+        createBackupSnapshot('Pre-Clear Safety Backup');
+      }
+      workoutHistory = [];
+      saveWorkoutHistory({ reason: 'Cleared All History', allowEmptyOverwrite: true });
+      renderHistoryPanel();
+      showToast('All workout history cleared (Safety Snapshot preserved below — click ↺ Restore anytime!).');
+    } else if (act === 'force-recover') {
+      initAutoBackupAndRecovery(true);
+    } else if (act === 'create-snapshot') {
+      if (workoutHistory.length === 0) {
+        showToast('Log at least 1 workout session (or load Demo Schedule) before creating a snapshot.');
+        return;
+      }
+      createBackupSnapshot('Manual User Restore Point');
+      saveWorkoutHistory({ reason: 'Manual Restore Point' });
+      renderHistoryPanel();
+      showToast(`📸 Manual Restore Point saved (${workoutHistory.length} sessions protected)!`);
+    } else if (act === 'export-backup') {
+      exportBackupJsonFile();
+      showToast('📥 Downloaded workout backup JSON file!');
+    } else if (act === 'trigger-import') {
+      const fileInput = document.getElementById('backupFileInput');
+      if (fileInput) fileInput.click();
+    } else if (act === 'restore-snapshot') {
+      const snapId = actionBtn.getAttribute('data-snapshot-id');
+      if (snapId) restoreFromSnapshot(snapId);
+    }
+  });
+
+  historyAnalysisPageContainer.addEventListener('change', (e) => {
+    const target = e.target;
+    if (target && target.getAttribute('data-history-action') === 'toggle-auto-download') {
+      appState.autoDownloadBackupOnLog = Boolean(target.checked);
+      saveAppState();
+      showToast(
+        appState.autoDownloadBackupOnLog
+          ? '✅ Auto-download .json backup enabled on every Workout Log!'
+          : 'Auto-download .json backup turned off (Disk & IndexedDB auto-backups remain active).'
+      );
+      return;
+    }
+    if (target && target.id === 'backupFileInput' && target.files && target.files[0]) {
+      const file = target.files[0];
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        importBackupJsonData(String(ev.target.result || ''));
+        target.value = '';
+      };
+      reader.readAsText(file);
+    }
+  });
+}
+
 window.addEventListener('hashchange', () => {
-  if (window.location.hash === '#library') {
+  if (window.location.hash === '#planner') {
+    switchPageView('planner');
+  } else if (window.location.hash === '#library') {
     switchPageView('library');
+  } else if (window.location.hash === '#history') {
+    switchPageView('history');
   } else if (window.location.hash === '#tracker') {
     switchPageView('tracker');
   }
@@ -3228,6 +5927,16 @@ if (librarySectionsContainer) {
       const mKey = musclePill.getAttribute('data-lib-card-muscle');
       toggleDummyMuscleFilter(mKey);
       showToast(`🎯 Mannequin Filter: ${MUSCLE_FRIENDLY_LABELS[mKey] || mKey}`);
+      return;
+    }
+
+    const addDayBtn = e.target.closest('[data-lib-add-day]');
+    if (addDayBtn) {
+      const dKey = addDayBtn.getAttribute('data-lib-add-day');
+      const exId = addDayBtn.getAttribute('data-lib-ex-id');
+      if (dKey && exId) {
+        addExerciseToRoutineDay(dKey, exId);
+      }
     }
   });
 
@@ -3259,12 +5968,17 @@ if (librarySectionsContainer) {
 }
 
 /* ==========================================================================
-   Initial Render
+   Initial Render & Automatic Backup Recovery
    ========================================================================== */
 updateHeaderAndStats();
 renderExerciseCards();
 renderHistoryPanel();
 updateTimerUI();
-if (window.location.hash === '#library') {
+initAutoBackupAndRecovery(false);
+if (window.location.hash === '#planner') {
+  switchPageView('planner');
+} else if (window.location.hash === '#library') {
   switchPageView('library');
+} else if (window.location.hash === '#history') {
+  switchPageView('history');
 }

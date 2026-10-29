@@ -1,3 +1,9 @@
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Personal workout data saved by server.py
+workout-backup.json
+workout-backup.json.tmp
+backups/
+__pycache__/

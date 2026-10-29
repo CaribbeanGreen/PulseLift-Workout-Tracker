@@ -12,10 +12,14 @@ Built with plain HTML, CSS and JavaScript. No libraries, no build step.
 
 ## Run
 
-Open `index.html` in a browser, or serve the folder (needed for offline mode and install):
+Start the local server (Python 3, standard library only):
 
 ```bash
-python -m http.server 8000
+python server.py
 ```
 
-Then go to `http://localhost:8000`.
+Then go to `http://localhost:8765`. The server also saves your workout history to
+`workout-backup.json` (with daily copies in `backups/`), so logs survive a cleared browser cache.
+These files stay on your computer and are not committed.
+
+Opening `index.html` directly still works, but without the disk backup.
