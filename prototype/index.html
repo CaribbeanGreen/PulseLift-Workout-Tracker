@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dumbbell Bench Press — PulseLift form guide (prototype)</title>
+  <link rel="stylesheet" href="proto.css?v=7" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="../" title="Back to the current PulseLift app">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">PulseLift</span>
+    </a>
+    <nav class="crumbs" aria-label="Breadcrumb">
+      <span>Exercises</span><span class="sep">/</span><span>Chest</span><span class="sep">/</span>
+      <span class="here">Dumbbell Bench Press</span>
+    </nav>
+    <span class="pill pill-proto">Prototype</span>
+  </header>
+
+  <main class="layout">
+    <section class="stage-col" aria-label="3D form guide">
+      <div id="stage" class="stage">
+        <canvas id="view" aria-label="Animated 3D mannequin performing a dumbbell bench press"></canvas>
+
+        <div class="stage-top">
+          <div class="phase-badge" aria-live="polite">
+            <span id="phaseStep" class="phase-step">1 / 4</span>
+            <span id="phaseName" class="phase-name">Set up</span>
+            <span id="repText" class="phase-step rep-text"></span>
+          </div>
+          <div id="formToggle" class="segmented" role="group" aria-label="Form shown">
+            <button type="button" data-form="good" class="on">Correct form</button>
+            <button type="button" data-form="bad">Common mistake</button>
+          </div>
+        </div>
+
+        <div id="labels" class="labels" aria-hidden="true"></div>
+
+        <div id="mistakeBanner" class="mistake-banner hidden" role="status">
+          <span class="x" aria-hidden="true">✕</span>
+          <span><strong>Elbows flared to 90°.</strong> The upper arms line up with the shoulders, which loads the shoulder joint instead of the chest.</span>
+        </div>
+
+        <div class="stage-bottom">
+          <div id="camButtons" class="cam" role="group" aria-label="Camera angle">
+            <button type="button" data-cam="threeq" class="on">3/4</button>
+            <button type="button" data-cam="side">Side</button>
+            <button type="button" data-cam="front">Front</button>
+            <button type="button" data-cam="top">Top</button>
+          </div>
+          <label class="check"><input id="labelsToggle" type="checkbox" checked /> Callouts</label>
+          <label class="check" title="Fatigue over a 10-rep set: breathing, face, shaking arms and sweat"><input id="liveToggle" type="checkbox" checked /> Lively</label>
+          <label class="check" title="The camera leans in, shakes and pulls back with the effort"><input id="cineToggle" type="checkbox" checked /> Camera</label>
+          <label id="physLabel" class="check hidden" title="Hair, clothing and soft-body movement from the model's own physics rig"><input id="physToggle" type="checkbox" checked /> Physics</label>
+          <span class="hint">Drag to rotate · scroll to zoom</span>
+        </div>
+
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+        <div id="loader" class="loader">
+          <div class="spinner" aria-hidden="true"></div>
+          <p id="loaderText">Loading 3D model…</p>
+        </div>
+      </div>
+
+      <div class="transport">
+        <button id="playBtn" class="play" type="button" aria-label="Pause">
+          <svg id="iconPause" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+          <svg id="iconPlay" class="hidden" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <div class="timeline">
+          <div id="phaseTrack" class="phase-track"></div>
+          <input id="scrub" class="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Position in the rep" />
+        </div>
+        <button id="speedBtn" class="speed" type="button" title="Playback speed">1×</button>
+      </div>
+    </section>
+
+    <aside class="panel" aria-label="Exercise details">
+      <div class="title-block">
+        <p class="eyebrow">Chest · Compound · Beginner</p>
+        <h1>Dumbbell Bench Press</h1>
+        <p class="rx">3 sets × 8–12 reps · rest 60–90 s</p>
+      </div>
+
+      <section class="card setting-card">
+        <label for="characterSelect"><h2>Character</h2></label>
+        <select id="characterSelect" class="select" aria-describedby="characterNote"></select>
+        <p id="characterNote" class="fine"></p>
+        <label for="styleSelect" class="sub-label">Movement style</label>
+        <select id="styleSelect" class="select"></select>
+        <div id="physAmountWrap" class="hidden">
+          <label for="physAmount" class="sub-label">Hair and cloth movement <span id="physAmountText" class="range-val">30%</span></label>
+          <input id="physAmount" class="range" type="range" min="0" max="100" step="5" value="30" />
+          <p class="fine">Low keeps the styled hair with a light sway. 100% is full real-world physics.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Muscles worked</h2>
+        <div id="muscleChips" class="chips">
+          <button type="button" class="chip primary" data-muscle="pecs"><i></i>Pectorals<small>Primary</small></button>
+          <button type="button" class="chip" data-muscle="frontDelts"><i></i>Front delts<small>Secondary</small></button>
+          <button type="button" class="chip" data-muscle="triceps"><i></i>Triceps<small>Secondary</small></button>
+        </div>
+        <p class="fine">Hover or tap a muscle to show it on its own.</p>
+      </section>
+
+      <section class="card cue-card">
+        <div class="cue-head">
+          <h2 id="cueTitle">Set up</h2>
+          <div id="breath" class="breath"><span class="lung" aria-hidden="true"></span><span id="breathText">Breathe in and brace</span></div>
+        </div>
+        <p id="cueText" class="cue-text"></p>
+        <ol id="phaseList" class="phase-list"></ol>
+      </section>
+
+      <section class="card">
+        <h2>Common mistakes</h2>
+        <ul class="mistakes">
+          <li><button id="showMistakeBtn" type="button" class="link">Elbows flared to 90°</button> — keep them about 45° from your sides.</li>
+          <li>Wrists bent back — keep knuckles pointing at the ceiling.</li>
+          <li>Hips lifting off the bench to push the weight up.</li>
+          <li>Bouncing out of the bottom instead of pausing.</li>
+          <li>Feet in the air or shuffling — plant them flat.</li>
+        </ul>
+      </section>
+
+      <p class="disclaimer">Prototype. The form notes follow standard coaching guidance but have not yet been reviewed by a qualified trainer.</p>
+    </aside>
+  </main>
+
+  <script type="module" src="proto.js?v=19"></script>
+</body>
+</html>
